@@ -1,0 +1,13 @@
+[package]
+name = "cosmos_quantum_media_core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Rust core primitives for COSMOS quantum media timeline, state, and seed planning"
+
+[lib]
+name = "cosmos_quantum_media_core"
+path = "src/lib.rs"
+
+[dependencies]
+sha2 = "0.10"
