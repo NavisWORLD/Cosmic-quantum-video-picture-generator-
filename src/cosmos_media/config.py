@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import shutil
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -54,6 +55,25 @@ class Settings:
         for name in ("runs", "cache", "state", "receipts"):
             (self.home / name).mkdir(parents=True, exist_ok=True)
 
+    def resolved_ffmpeg(self) -> str:
+        """Resolve FFmpeg from an explicit path, PATH, or bundled imageio-ffmpeg.
+
+        The desktop distribution installs imageio-ffmpeg so clean Windows/macOS
+        installs can encode video without asking the user to separately install FFmpeg.
+        """
+        explicit = self.ffmpeg.strip()
+        if explicit and explicit != "ffmpeg":
+            return explicit
+        found = shutil.which(explicit or "ffmpeg")
+        if found:
+            return found
+        try:
+            import imageio_ffmpeg
+
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return explicit or "ffmpeg"
+
     def public_dict(self) -> dict[str, object]:
         return {
             "home": str(self.home),
@@ -61,6 +81,7 @@ class Settings:
             "media_endpoint": self.media_endpoint,
             "media_timeout": self.media_timeout,
             "ffmpeg": self.ffmpeg,
+            "ffmpeg_resolved": self.resolved_ffmpeg(),
             "api_host": self.api_host,
             "api_port": self.api_port,
             "quantum_mode": self.quantum_mode,
