@@ -29,44 +29,72 @@ class CosmosMediaEngine:
     def _state_path(self) -> Path:
         return self.settings.home / "state" / "current.json"
 
+    @staticmethod
+    def _decode_state_payload(data: dict[str, Any]) -> tuple[CSTState, HebbianAssociator]:
+        state_data = data.get("state", {})
+        state = CSTState(
+            list(state_data.get("values", [0.0] * 12)),
+            int(state_data.get("step_index", 0)),
+        )
+        hebbian_data = data.get("hebbian", {})
+        associator = HebbianAssociator(
+            learning_rate=float(hebbian_data.get("learning_rate", 0.04)),
+            decay=float(hebbian_data.get("decay", 0.995)),
+        )
+        weights = hebbian_data.get("weights")
+        if (
+            isinstance(weights, list)
+            and len(weights) == 12
+            and all(isinstance(row, list) and len(row) == 12 for row in weights)
+        ):
+            associator.weights = [[float(v) for v in row] for row in weights]
+        return state, associator
+
     def _load_state(self) -> tuple[CSTState, HebbianAssociator]:
         path = self._state_path
         if not path.exists():
             return CSTState(), HebbianAssociator()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            state_data = data.get("state", {})
-            state = CSTState(
-                list(state_data.get("values", [0.0] * 12)),
-                int(state_data.get("step_index", 0)),
-            )
-            hebbian_data = data.get("hebbian", {})
-            associator = HebbianAssociator(
-                learning_rate=float(hebbian_data.get("learning_rate", 0.04)),
-                decay=float(hebbian_data.get("decay", 0.995)),
-            )
-            weights = hebbian_data.get("weights")
-            if (
-                isinstance(weights, list)
-                and len(weights) == 12
-                and all(isinstance(row, list) and len(row) == 12 for row in weights)
-            ):
-                associator.weights = [[float(v) for v in row] for row in weights]
-            return state, associator
+            return self._decode_state_payload(data)
         except Exception:
-            # Corrupt state should not make the media engine unbootable.
+            # Corrupt global state should not make the media engine unbootable.
             return CSTState(), HebbianAssociator()
 
-    def _save_state(self) -> None:
-        payload = {
+    def _state_payload(self) -> dict[str, Any]:
+        return {
             "state": self.state.to_dict(),
             "hebbian": self.associator.to_dict(),
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _save_state(self) -> None:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         temp = self._state_path.with_suffix(".tmp")
-        temp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temp.write_text(json.dumps(self._state_payload(), indent=2), encoding="utf-8")
         temp.replace(self._state_path)
+
+    def _write_checkpoint(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(json.dumps(self._state_payload(), indent=2), encoding="utf-8")
+        temp.replace(path)
+
+    def _restore_checkpoint(self, path: Path) -> None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.state, self.associator = self._decode_state_payload(data)
+        except Exception as exc:
+            raise RuntimeError(f"could not restore video checkpoint {path}: {exc}") from exc
+
+    @staticmethod
+    def _checkpoint_state_hash(path: Path) -> str:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        state_data = data.get("state", {})
+        return CSTState(
+            list(state_data.get("values", [0.0] * 12)),
+            int(state_data.get("step_index", 0)),
+        ).hash()
 
     def reset_state(self, context: str = "") -> dict[str, Any]:
         self.state = CSTState.from_context(context) if context else CSTState()
@@ -208,14 +236,18 @@ class CosmosMediaEngine:
             run_id, run_dir = self._new_run("video")
 
         chunk_dir = run_dir / "chunks"
+        checkpoint_dir = run_dir / "checkpoints"
         chunk_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
         destination = Path(output)
         destination.parent.mkdir(parents=True, exist_ok=True)
         manifest_path = run_dir / "manifest.json"
+        initial_checkpoint = checkpoint_dir / "initial.json"
 
         width_v = int(width or self.settings.width)
         height_v = int(height or self.settings.height)
         fps_v = int(fps or self.settings.fps)
+        prior_manifest: dict[str, Any] = {}
 
         if resume_run:
             if not manifest_path.exists():
@@ -241,7 +273,11 @@ class CosmosMediaEngine:
                     )
             if "base_seed" not in prior_manifest or "base_seed_hash" not in prior_manifest:
                 raise ValueError(
-                    "resume manifest predates deterministic-resume support; rerun with an explicit --seed"
+                    "resume manifest predates deterministic-resume support; start a new run"
+                )
+            if not initial_checkpoint.exists():
+                raise ValueError(
+                    "resume run has no initial state checkpoint; start a new run"
                 )
             base_seed = int(prior_manifest["base_seed"])
             seed_hash = str(prior_manifest["base_seed_hash"])
@@ -256,6 +292,7 @@ class CosmosMediaEngine:
                 context=context,
                 explicit_seed=seed,
             )
+            self._write_checkpoint(initial_checkpoint)
 
         manifest: dict[str, Any] = {
             "run_id": run_id,
@@ -271,6 +308,33 @@ class CosmosMediaEngine:
             "base_seed_hash": seed_hash,
             "chunks": [],
         }
+
+        prior_records = {
+            int(item["index"]): item
+            for item in prior_manifest.get("chunks", [])
+            if isinstance(item, dict) and "index" in item
+        }
+
+        # A chunk is complete only if both its media file and its state checkpoint
+        # exist. This makes a crash between rendering and checkpointing safe: the
+        # incomplete chunk is simply regenerated from the previous checkpoint.
+        completed_prefix = -1
+        if resume_run:
+            for plan in chunks:
+                chunk_path = chunk_dir / f"chunk-{plan.index:05d}.mp4"
+                checkpoint_path = checkpoint_dir / f"chunk-{plan.index:05d}.json"
+                if chunk_path.exists() and chunk_path.stat().st_size > 0 and checkpoint_path.exists():
+                    completed_prefix = plan.index
+                else:
+                    break
+            if completed_prefix >= 0:
+                self._restore_checkpoint(
+                    checkpoint_dir / f"chunk-{completed_prefix:05d}.json"
+                )
+            else:
+                self._restore_checkpoint(initial_checkpoint)
+            self._save_state()
+
         # Persist the base seed before expensive work so an interruption after
         # chunk zero can resume the exact same trajectory.
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -287,17 +351,21 @@ class CosmosMediaEngine:
                 plan.duration,
             )
             chunk_path = chunk_dir / f"chunk-{plan.index:05d}.mp4"
-            skipped = chunk_path.exists() and chunk_path.stat().st_size > 0
+            checkpoint_path = checkpoint_dir / f"chunk-{plan.index:05d}.json"
+            skipped = plan.index <= completed_prefix
 
             if skipped:
-                # The persisted global state was advanced after every completed
-                # chunk in the original run. Do not advance it twice on resume.
-                state = self.state
+                prior = prior_records.get(plan.index, {})
+                state_hash = str(
+                    prior.get("state_hash")
+                    or self._checkpoint_state_hash(checkpoint_path)
+                )
             else:
                 state = self._advance(
                     f"video|{prompt}|chunk={plan.index}|"
                     f"progress={plan.narrative_progress:.9f}|seed={chunk_seed}"
                 )
+                state_hash = state.hash()
                 continuity = {
                     "index": plan.index,
                     "start": plan.start,
@@ -305,7 +373,7 @@ class CosmosMediaEngine:
                     "overlap_before": plan.overlap_before,
                     "overlap_after": plan.overlap_after,
                     "previous_output": previous_output,
-                    "state_hash": state.hash(),
+                    "state_hash": state_hash,
                 }
                 self.provider.generate_video(
                     VideoJob(
@@ -321,6 +389,7 @@ class CosmosMediaEngine:
                         continuity=continuity,
                     )
                 )
+                self._write_checkpoint(checkpoint_path)
                 self._save_state()
 
             rendered_paths.append(chunk_path)
@@ -329,12 +398,12 @@ class CosmosMediaEngine:
                 {
                     **plan.to_dict(),
                     "path": str(chunk_path),
+                    "checkpoint": str(checkpoint_path),
                     "seed_hash": chunk_seed_hash,
-                    "state_hash": state.hash(),
+                    "state_hash": state_hash,
                     "resumed": skipped,
                 }
             )
-            # Persist progress after each chunk so interruption loses at most one clip.
             manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         self._stitch(rendered_paths, destination, run_dir)
