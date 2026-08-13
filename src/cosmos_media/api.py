@@ -7,9 +7,11 @@ from threading import Lock
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .config import Settings, load_env_file
 from .engine import CosmosMediaEngine
 from .integrator import CAPABILITIES
@@ -37,10 +39,33 @@ def _resolve_pwa_dir() -> Path:
     return local
 
 
+def _cors_origins() -> list[str]:
+    configured = os.getenv("COSMOS_CORS_ORIGINS", "").strip()
+    if configured:
+        return [value.strip() for value in configured.split(",") if value.strip()]
+    # Capacitor uses local WebView origins. Browser/PWA same-origin calls do not
+    # require CORS, while these defaults let packaged mobile clients reach a
+    # COSMOS engine on the user's LAN or trusted deployment.
+    return [
+        "capacitor://localhost",
+        "ionic://localhost",
+        "http://localhost",
+        "https://localhost",
+    ]
+
+
 app = FastAPI(
     title="COSMOS Quantum Media API",
-    version="0.1.0",
+    version=__version__,
     description="Standalone/helper/bridge media engine with CST continuity and optional IBM Quantum provenance",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept"],
 )
 
 
@@ -95,12 +120,12 @@ def _run(fn, *args, **kwargs):
 
 @app.get("/v1/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "engine": "cosmos-quantum-media/0.1.0", "provider": _engine.provider.name}
+    return {"ok": True, "engine": f"cosmos-quantum-media/{__version__}", "provider": _engine.provider.name}
 
 
 @app.get("/v1/capabilities")
 def capabilities() -> dict[str, Any]:
-    return {**CAPABILITIES, "provider": _engine.provider.name}
+    return {**CAPABILITIES, "provider": _engine.provider.name, "version": __version__}
 
 
 @app.get("/v1/state")
