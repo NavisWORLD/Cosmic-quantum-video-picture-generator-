@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import shutil
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -50,9 +51,29 @@ class Settings:
     branches: int = field(default_factory=lambda: int(os.getenv("COSMOS_BRANCHES", "4")))
     seed_namespace: str = field(default_factory=lambda: os.getenv("COSMOS_SEED_NAMESPACE", "cosmos-media-v1"))
 
+    def __post_init__(self) -> None:
+        # A packaged desktop build includes imageio-ffmpeg. Resolve it during
+        # settings construction so existing render/stitch code transparently
+        # receives a real executable path on clean Windows/macOS installations.
+        self.ffmpeg = self.resolved_ffmpeg()
+
     def ensure_dirs(self) -> None:
         for name in ("runs", "cache", "state", "receipts"):
             (self.home / name).mkdir(parents=True, exist_ok=True)
+
+    def resolved_ffmpeg(self) -> str:
+        explicit = self.ffmpeg.strip()
+        if explicit and explicit != "ffmpeg":
+            return explicit
+        found = shutil.which(explicit or "ffmpeg")
+        if found:
+            return found
+        try:
+            import imageio_ffmpeg
+
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return explicit or "ffmpeg"
 
     def public_dict(self) -> dict[str, object]:
         return {

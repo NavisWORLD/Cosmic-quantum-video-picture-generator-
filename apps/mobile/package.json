@@ -1,0 +1,23 @@
+{
+  "name": "cosmos-media-mobile",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Native iPhone/Android shell for the COSMOS Media engine",
+  "scripts": {
+    "sync": "cap sync",
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "assets": "capacitor-assets generate --iconBackgroundColor '#090b17' --iconBackgroundColorDark '#090b17' --splashBackgroundColor '#090b17' --splashBackgroundColorDark '#090b17'",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.4.2",
+    "@capacitor/core": "8.4.2",
+    "@capacitor/ios": "8.4.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.4.2"
+  }
+}

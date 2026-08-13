@@ -1,0 +1,11 @@
+{
+  "appId": "world.navis.cosmosmedia",
+  "appName": "COSMOS Media",
+  "webDir": "../pwa",
+  "server": {
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
