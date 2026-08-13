@@ -25,21 +25,42 @@ jobs:
         run: python -m compileall -q src
       - name: Test
         run: pytest
-      - name: Smoke image
-        run: cosmos-media image --prompt "CI cosmic garden" --seed 123 --width 320 --height 180 --out out/ci.png
-      - name: Smoke stitched video
-        run: cosmos-media video --prompt "CI continuous cosmic garden" --seed 321 --duration 1.0 --chunk-seconds 0.5 --overlap-seconds 0.1 --fps 12 --width 320 --height 180 --out out/ci-video.mp4
-      - name: Smoke storybook
-        run: cosmos-media storybook --context-file examples/story_context.txt --pages 2 --seed 777 --out out/ci-storybook
+      - name: Verify default provider is native
+        run: |
+          cosmos-media status > out-status.json
+          grep '"provider": "native"' out-status.json
+      - name: Smoke native image
+        run: cosmos-media image --prompt "a luminous world tree above an alien ocean with floating islands and an observatory" --context "two moons, deep space, living memory" --seed 123 --width 640 --height 360 --out out/ci-native.png
+      - name: Smoke native stitched video
+        run: cosmos-media video --prompt "a continuous flight through a luminous cosmic garden above an alien ocean" --context "floating islands, world tree, stars, reflections" --seed 321 --duration 1.0 --chunk-seconds 0.5 --overlap-seconds 0.1 --fps 12 --width 320 --height 180 --out out/ci-native-video.mp4
+      - name: Smoke native storybook
+        run: cosmos-media storybook --context-file examples/story_context.txt --pages 2 --seed 777 --out out/ci-native-storybook
+      - name: Smoke JSONL bridge
+        run: |
+          printf '%s\n' '{"id":"caps","op":"capabilities"}' '{"id":"plan","op":"plan","prompt":"continue the luminous world"}' | cosmos-media bridge --stdio > out/ci-bridge.jsonl
+          grep '"ok":true' out/ci-bridge.jsonl
       - name: Verify media artifacts
         run: |
-          test -s out/ci.png
-          test -s out/ci-video.mp4
-          test -s out/ci-storybook/page-001.png
-          test -s out/ci-storybook/page-002.png
-          test -s out/ci-storybook/BOOK.md
+          test -s out/ci-native.png
+          test -s out/ci-native-video.mp4
+          test -s out/ci-native-storybook/page-001.png
+          test -s out/ci-native-storybook/page-002.png
+          test -s out/ci-native-storybook/BOOK.md
+          test -s out/ci-bridge.jsonl
       - name: Doctor
         run: cosmos-media doctor
+      - name: Upload native proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cosmos-native-proof-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            out/ci-native.png
+            out/ci-native-video.mp4
+            out/ci-native-storybook/
+            out/ci-bridge.jsonl
+            out-status.json
 
   rust:
     runs-on: ubuntu-latest
