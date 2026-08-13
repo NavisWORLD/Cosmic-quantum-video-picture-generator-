@@ -31,7 +31,7 @@ def load_env_file(path: str | Path = ".env", *, override: bool = False) -> None:
 @dataclass(slots=True)
 class Settings:
     home: Path = field(default_factory=lambda: Path(os.getenv("COSMOS_HOME", ".cosmos-media")))
-    provider: str = field(default_factory=lambda: os.getenv("COSMOS_MEDIA_PROVIDER", "procedural").strip().lower())
+    provider: str = field(default_factory=lambda: os.getenv("COSMOS_MEDIA_PROVIDER", "native").strip().lower())
     media_endpoint: str = field(default_factory=lambda: os.getenv("COSMOS_MEDIA_ENDPOINT", "http://127.0.0.1:9000").rstrip("/"))
     media_timeout: float = field(default_factory=lambda: float(os.getenv("COSMOS_MEDIA_TIMEOUT", "600")))
     ffmpeg: str = field(default_factory=lambda: os.getenv("COSMOS_FFMPEG", "ffmpeg"))
