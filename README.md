@@ -1,1 +1,235 @@
-# Cosmic-quantum-video-picture-generator-
+# COSMOS // Cosmic Quantum Video & Picture Generator
+
+**Local-first, provider-neutral image/video/storybook orchestration with CST state, deterministic provenance, long-form chunking, computational branch search, and optional IBM Quantum entropy/provenance.**
+
+> Status: **research + engineering release**. This repository contains working orchestration, procedural fallback generation, a pluggable media-provider protocol, long-form timeline rendering, storybook generation, CST-inspired state evolution, Rust/C++ reference cores, an installable PWA, tests, CI, and IBM Quantum integration hooks. Model weights are intentionally not bundled.
+
+## What this actually is
+
+COSMOS Media is a generation **engine and integration layer**, not a claim that a quantum computer directly renders pixels. It coordinates:
+
+1. user context and creative intent;
+2. a persistent 12-dimensional CST-inspired state vector;
+3. deterministic seed/provenance mixing;
+4. optional IBM Quantum measurement-derived entropy;
+5. computational “multiverse” branch search (multiple candidate prompt/state branches scored by a reward function);
+6. image/video provider adapters;
+7. long-form video chunk planning and stitching;
+8. storybook scene extraction and illustration;
+9. a language-neutral JSON API for Python, Rust, C++, JavaScript, desktop, mobile/PWA, and external tools.
+
+The term **multiverse** in this repository refers to parallel computational candidate branches unless a document explicitly says otherwise. The project does **not** claim to prove physical multiverse access, cross-universe injection, consciousness, or quantum advantage. Those ideas can be investigated experimentally, but claims require controlled evidence.
+
+## Why it is different
+
+Most media generators are stateless request/response wrappers. COSMOS Media adds a continuity layer:
+
+- **Stateful creation:** each scene can inherit a compact 12D state from prior scenes.
+- **Hebbian-style adaptation:** repeated semantic/state pairings can strengthen a small association matrix used to bias later state transitions.
+- **Branch search:** create N candidate creative trajectories, score them, then continue the best branch.
+- **Quantum provenance:** optionally mix IBM measurement results into the seed trail and preserve backend/job/result hashes.
+- **Reproducible receipts:** every generation can emit a JSON receipt containing context hash, state hash, seed hash, provider, parameters, and outputs.
+- **Long-form rendering:** a 60-minute request becomes a resumable sequence of bounded clips with overlap/continuity metadata, then gets stitched with FFmpeg.
+- **Provider neutrality:** realistic output quality comes from the media model/provider you attach. COSMOS supplies orchestration and continuity rather than locking the project to one vendor.
+
+## Quick start
+
+### Python 3.10+
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -e ".[server,media,test]"
+cp .env.example .env   # Windows: copy .env.example .env
+cosmos-media doctor
+cosmos-media image --prompt "a bioluminescent library orbiting Saturn" --out out/library.png
+cosmos-media video --prompt "slow flight through the library" --duration 30 --out out/library.mp4
+cosmos-media storybook --context examples/story_context.txt --out out/storybook
+cosmos-media serve
+```
+
+Without an external model backend, the built-in **procedural provider** produces deterministic reference images/video so the stack can be tested end-to-end. For photorealistic output, attach a real provider through the HTTP provider protocol described in `docs/INTEGRATION_GUIDE.md`.
+
+### One-hour video
+
+```bash
+cosmos-media video \
+  --prompt "a continuous cinematic expedition through an impossible ocean planet" \
+  --duration 3600 \
+  --chunk-seconds 8 \
+  --out out/ocean-hour.mp4
+```
+
+COSMOS plans the hour as resumable chunks, preserves continuity metadata, renders each chunk, and stitches the result. Rendering time, VRAM, storage, and visual quality depend on the attached provider. “Infinite” therefore means **continuable/resumable with no engine-level narrative duration cap**, not infinite compute.
+
+## IBM Quantum mode
+
+Install the optional dependency:
+
+```bash
+pip install -e ".[quantum]"
+```
+
+Set your own credentials:
+
+```bash
+COSMOS_QUANTUM_MODE=ibm
+IBM_QUANTUM_API_KEY=...
+IBM_QUANTUM_INSTANCE=...   # recommended CRN / instance
+IBM_QUANTUM_BACKEND=       # optional preferred backend
+```
+
+The adapter uses the current IBM Quantum Platform authentication model through `qiskit_ibm_runtime.QiskitRuntimeService`. If credentials, a backend, network access, or queue capacity are unavailable, the engine fails soft to a local cryptographic entropy source unless strict mode is enabled.
+
+Quantum receipts can include: backend name, job identifier when available, raw-bit hash, result hash, and the final mixed seed hash. Secrets are never written to receipts.
+
+## Repository map
+
+```text
+src/cosmos_media/          Python orchestration engine and API
+native/rust/               Rust CST/seed/timeline reference core
+native/cpp/                C++17 CST/seed/timeline reference core
+apps/pwa/                  installable mobile/desktop web app
+docs/                      manuals, research disclosure, integration guides
+examples/                  sample context + provider examples
+scripts/                   install/run helpers
+tests/                     Python tests
+.github/workflows/          cross-language CI
+```
+
+## Core loop
+
+The media engine follows the COSMOS lineage:
+
+**perceive → compress → expand → validate → express → store**
+
+For media generation that becomes:
+
+1. **Perceive** user context, references, prompt and optional sensor/metadata input.
+2. **Compress** into hashes, scene descriptors and a 12D creative state.
+3. **Expand** into candidate branches, prompts, seeds and shot plans.
+4. **Validate** length, resource limits, provider capability and continuity constraints.
+5. **Express** through the selected image/video provider.
+6. **Store** receipts, state checkpoints, branch scores and output manifests.
+
+## API
+
+Run:
+
+```bash
+cosmos-media serve --host 127.0.0.1 --port 8788
+```
+
+Key endpoints:
+
+- `GET /v1/health`
+- `GET /v1/state`
+- `POST /v1/image`
+- `POST /v1/video`
+- `POST /v1/storybook`
+- `POST /v1/branch-search`
+- `GET /v1/quantum/status`
+
+The API schemas are intentionally plain JSON so external engines can integrate without importing Python.
+
+## Provider protocol
+
+Set:
+
+```bash
+COSMOS_MEDIA_PROVIDER=http
+COSMOS_MEDIA_ENDPOINT=http://127.0.0.1:9000
+```
+
+COSMOS will call:
+
+```text
+POST /generate/image
+POST /generate/video
+```
+
+The provider receives prompt, seed, state, duration/resolution, continuity metadata and an output target. See `docs/INTEGRATION_GUIDE.md` for the complete contract.
+
+## Rust
+
+```bash
+cd native/rust
+cargo test
+cargo run --example demo
+```
+
+The Rust crate implements deterministic seed mixing, 12D state stepping and long-form chunk planning so high-throughput integrations can share the same planning semantics without Python.
+
+## C++
+
+```bash
+cmake -S native/cpp -B native/cpp/build
+cmake --build native/cpp/build
+ctest --test-dir native/cpp/build
+```
+
+The C++17 library mirrors the core deterministic planning primitives and exposes a small header-friendly API suitable for game engines, render farms and native tools.
+
+## Installable app
+
+`apps/pwa/` is a Progressive Web App. Serve the repository API and the PWA together, then install it from a desktop browser or add it to the home screen on iOS/Android. The UI talks to the same `/v1` API used by engineering integrations.
+
+For distributable desktop builds, `scripts/build_desktop.py` uses PyInstaller when installed. Native mobile shells can wrap the same PWA/API contract without changing the engine.
+
+## Reproducibility and receipts
+
+Each generation directory can contain:
+
+```text
+manifest.json
+receipt.json
+state.json
+chunks/
+outputs/
+```
+
+A receipt records enough metadata to compare classical and IBM-assisted seed paths without exposing API keys. This is designed for ablation testing: same prompt/provider/settings, different entropy source, repeated trials, measured outcome metrics.
+
+## Research disclosure
+
+The repository separates **implemented engineering** from **research hypotheses**. In particular:
+
+- IBM Quantum can supply measurement results, runtime/job provenance and entropy-like input.
+- This repo does not assert that quantum-derived seeds make a model more accurate, creative or realistic.
+- “12D,” “CST,” “Hebbian,” “multiverse,” and “entanglement” terminology may name project-specific computational structures; they should not be read as established physical conclusions without independent evidence.
+- Claims of quantum advantage should be tested against classical baselines with matched compute, provider/model, prompt, seed budget and evaluation metrics.
+
+See `docs/RESEARCH_DISCLOSURE.md`.
+
+## Lineage and provenance
+
+This public build preserves the COSMOS / Cosmic Synapse Theory project lineage and its local-first adaptive-system architecture. Project provenance includes the user’s timestamped research record and Zenodo DOI **10.5281/zenodo.17574447**. See `NOTICE.md` for attribution/provenance notes.
+
+## License
+
+Apache License 2.0. See `LICENSE` and `NOTICE.md`. Third-party models, providers, datasets and SDKs retain their own licenses and terms. No model weights are sublicensed by this repository.
+
+## Safety and privacy
+
+- Keep API keys in environment variables or a local secret manager.
+- Do not commit private source images, biometric data, or third-party copyrighted datasets without permission.
+- A generated-media provider may impose its own content rules and data-retention policy.
+- Receipts intentionally store hashes and technical metadata, not raw secrets.
+
+## Definition of “done” for this release
+
+The repository is considered engine-complete when:
+
+- Python package installs and CLI starts;
+- procedural image and video paths work end-to-end;
+- long-form timeline planning supports 60 minutes and resumes by chunk;
+- storybook generation produces scene metadata + illustrations;
+- IBM adapter connects when user credentials/dependencies are available and fails soft otherwise;
+- HTTP provider adapter can hand work to a real image/video backend;
+- Rust and C++ cores compile/test;
+- PWA installs and calls the API;
+- CI verifies Python/Rust/C++ on every push;
+- documentation distinguishes implemented behavior from experimental claims.
+
+That is the scope of this public engineering release.
