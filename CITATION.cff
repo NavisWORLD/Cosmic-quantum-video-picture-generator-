@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this repository and the linked COSMOS/CST provenance record where relevant."
+title: "COSMOS Cosmic Quantum Video & Picture Generator"
+type: software
+authors:
+  - family-names: Davis
+    given-names: Cory
+version: 0.1.0
+date-released: 2026-08-12
+license: Apache-2.0
+repository-code: "https://github.com/NavisWORLD/Cosmic-quantum-video-picture-generator-"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.17574447"
+    description: "COSMOS/CST project provenance record referenced by this software lineage"
+keywords:
+  - generative media
+  - image generation
+  - video generation
+  - quantum provenance
+  - CST
+  - COSMOS
+  - long-form video
