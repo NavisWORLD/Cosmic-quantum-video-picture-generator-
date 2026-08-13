@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cosmos-quantum-media"
-version = "0.3.0"
-description = "COSMOS/CST stateful media engine with cross-language Synaptic SDKs, native rendering, and optional IBM Quantum provenance"
+version = "0.2.0"
+description = "COSMOS/CST stateful image, video and storybook engine with native rendering and optional IBM Quantum provenance"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
