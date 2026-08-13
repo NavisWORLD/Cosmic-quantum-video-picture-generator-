@@ -5,6 +5,7 @@ from threading import Lock
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import Settings, load_env_file
@@ -14,6 +15,8 @@ load_env_file(".env")
 _settings = Settings()
 _engine = CosmosMediaEngine(_settings)
 _lock = Lock()
+
+Path("out").mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="COSMOS Quantum Media API",
@@ -143,3 +146,9 @@ def storybook(request: StorybookRequest) -> dict[str, Any]:
 @app.post("/v1/branch-search")
 def branches(request: BranchRequest) -> list[dict[str, Any]]:
     return _run(_engine.branch_search, request.prompt, request.count)
+
+
+# Keep API routes above mounts. Generated files remain restricted to the explicit
+# public out/ directory rather than exposing arbitrary filesystem paths.
+app.mount("/out", StaticFiles(directory="out", check_dir=False), name="outputs")
+app.mount("/app", StaticFiles(directory="apps/pwa", html=True, check_dir=False), name="pwa")
