@@ -7,13 +7,6 @@ on:
       - main
     paths:
       - "pyproject.toml"
-      - "src/**"
-      - "apps/pwa/**"
-      - "apps/mobile/**"
-      - "scripts/build_desktop.py"
-      - "scripts/build_windows_installer.ps1"
-      - "scripts/build_macos.sh"
-      - "packaging/**"
       - ".github/workflows/release.yml"
 
 permissions:
