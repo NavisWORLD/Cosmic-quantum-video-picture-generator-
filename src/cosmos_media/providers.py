@@ -3,13 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 import base64
 import json
+import math
 from pathlib import Path
 import random
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Protocol
 
 from .config import Settings
+from .native_renderer import render_native_image
 
 
 @dataclass(slots=True)
@@ -45,12 +48,94 @@ class MediaProvider(Protocol):
     def generate_video(self, job: VideoJob) -> Path: ...
 
 
-class ProceduralProvider:
-    """Dependency-light deterministic fallback for testing the whole stack.
+class NativeProvider:
+    """First-party COSMOS renderer.
 
-    It is deliberately not advertised as a photorealistic model. It creates a
-    reproducible visual card and can turn it into a short MP4 with FFmpeg.
+    Images and animation frames are synthesized entirely by code in this
+    repository from prompt/context, seed and CST state. No remote media model,
+    ComfyUI server, Diffusers pipeline or hosted image API is required.
     """
+
+    name = "native"
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def generate_image(self, job: ImageJob) -> Path:
+        job.output.parent.mkdir(parents=True, exist_ok=True)
+        image = render_native_image(
+            job.prompt,
+            job.context,
+            job.seed,
+            job.state,
+            job.width,
+            job.height,
+            phase=0.0,
+        )
+        image.save(job.output)
+        return job.output
+
+    def generate_video(self, job: VideoJob) -> Path:
+        job.output.parent.mkdir(parents=True, exist_ok=True)
+        ffmpeg = shutil.which(self.settings.ffmpeg) or self.settings.ffmpeg
+        # Bound internal synthesis cadence while preserving requested output FPS.
+        # This keeps long timelines practical without retaining frames in RAM.
+        synth_fps = max(2, min(job.fps, 8))
+        frame_count = max(1, int(math.ceil(job.duration * synth_fps)))
+        continuity = job.continuity or {}
+        global_start = float(continuity.get("start", 0.0))
+
+        with tempfile.TemporaryDirectory(prefix="cosmos-native-") as temp_dir:
+            frames = Path(temp_dir)
+            for index in range(frame_count):
+                local_t = index / synth_fps
+                phase = global_start + local_t
+                image = render_native_image(
+                    job.prompt,
+                    job.context,
+                    job.seed,
+                    job.state,
+                    job.width,
+                    job.height,
+                    phase=phase,
+                )
+                image.save(frames / f"frame-{index:06d}.png")
+
+            command = [
+                ffmpeg,
+                "-y",
+                "-framerate",
+                str(synth_fps),
+                "-i",
+                str(frames / "frame-%06d.png"),
+                "-t",
+                f"{job.duration:.6f}",
+                "-r",
+                str(job.fps),
+                "-vf",
+                "format=yuv420p",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-movflags",
+                "+faststart",
+                str(job.output),
+            ]
+            try:
+                subprocess.run(command, check=True, capture_output=True)
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    "FFmpeg was not found. Install ffmpeg or set COSMOS_FFMPEG."
+                ) from exc
+            except subprocess.CalledProcessError as exc:
+                stderr = exc.stderr.decode("utf-8", errors="replace")[-2500:]
+                raise RuntimeError(f"COSMOS native FFmpeg encode failed: {stderr}") from exc
+        return job.output
+
+
+class ProceduralProvider:
+    """Tiny deterministic diagnostic renderer used for plumbing tests."""
 
     name = "procedural"
 
@@ -61,7 +146,9 @@ class ProceduralProvider:
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError as exc:
-            raise RuntimeError("Pillow is required for procedural media: pip install -e '.[media]'") from exc
+            raise RuntimeError(
+                "Pillow is required for procedural media: pip install -e '.[media]'"
+            ) from exc
 
         rng = random.Random(job.seed)
         image = Image.new(
@@ -83,16 +170,30 @@ class ProceduralProvider:
                 rng.randrange(30, 256),
                 alpha,
             )
-            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+            draw.ellipse(
+                (x - radius, y - radius, x + radius, y + radius), fill=color
+            )
 
-        # Add a dark readability panel and compact prompt/state metadata.
         panel_h = min(job.height // 3, 230)
-        draw.rectangle((0, job.height - panel_h, job.width, job.height), fill=(0, 0, 0, 160))
+        draw.rectangle(
+            (0, job.height - panel_h, job.width, job.height), fill=(0, 0, 0, 160)
+        )
         font = ImageFont.load_default()
         wrapped = _wrap_text(job.prompt, max_chars=max(24, job.width // 12))
         state_text = "CST " + " ".join(f"{v:+.2f}" for v in job.state[:6])
-        draw.multiline_text((24, job.height - panel_h + 20), wrapped, font=font, fill=(255, 255, 255, 240), spacing=5)
-        draw.text((24, job.height - 28), state_text, font=font, fill=(190, 220, 255, 220))
+        draw.multiline_text(
+            (24, job.height - panel_h + 20),
+            wrapped,
+            font=font,
+            fill=(255, 255, 255, 240),
+            spacing=5,
+        )
+        draw.text(
+            (24, job.height - 28),
+            state_text,
+            font=font,
+            fill=(190, 220, 255, 220),
+        )
         return image
 
     def generate_image(self, job: ImageJob) -> Path:
@@ -118,20 +219,30 @@ class ProceduralProvider:
         command = [
             ffmpeg,
             "-y",
-            "-loop", "1",
-            "-i", str(still),
-            "-t", f"{job.duration:.6f}",
-            "-r", str(job.fps),
-            "-vf", "format=yuv420p",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-movflags", "+faststart",
+            "-loop",
+            "1",
+            "-i",
+            str(still),
+            "-t",
+            f"{job.duration:.6f}",
+            "-r",
+            str(job.fps),
+            "-vf",
+            "format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-movflags",
+            "+faststart",
             str(job.output),
         ]
         try:
             subprocess.run(command, check=True, capture_output=True)
         except FileNotFoundError as exc:
-            raise RuntimeError("FFmpeg was not found. Install ffmpeg or set COSMOS_FFMPEG.") from exc
+            raise RuntimeError(
+                "FFmpeg was not found. Install ffmpeg or set COSMOS_FFMPEG."
+            ) from exc
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.decode("utf-8", errors="replace")[-2000:]
             raise RuntimeError(f"FFmpeg failed: {stderr}") from exc
@@ -141,13 +252,7 @@ class ProceduralProvider:
 
 
 class HTTPProvider:
-    """Language-neutral provider bridge.
-
-    The remote service may return one of:
-      {"path": "/shared/output.png"}
-      {"url": "https://..."}
-      {"data_base64": "..."}
-    """
+    """Language-neutral provider bridge for attaching any external renderer."""
 
     name = "http"
 
@@ -158,13 +263,19 @@ class HTTPProvider:
         try:
             import httpx
         except ImportError as exc:
-            raise RuntimeError("httpx is required for HTTP providers: pip install -e '.[media]'") from exc
+            raise RuntimeError(
+                "httpx is required for HTTP providers: pip install -e '.[media]'"
+            ) from exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         with httpx.Client(timeout=self.settings.media_timeout) as client:
             response = client.post(f"{self.settings.media_endpoint}{route}", json=payload)
             response.raise_for_status()
             ctype = response.headers.get("content-type", "")
-            if ctype.startswith("image/") or ctype.startswith("video/") or ctype == "application/octet-stream":
+            if (
+                ctype.startswith("image/")
+                or ctype.startswith("video/")
+                or ctype == "application/octet-stream"
+            ):
                 destination.write_bytes(response.content)
                 return destination
             data = response.json()
@@ -174,7 +285,9 @@ class HTTPProvider:
             if data.get("path"):
                 source = Path(data["path"])
                 if not source.exists():
-                    raise RuntimeError(f"Provider returned missing shared path: {source}")
+                    raise RuntimeError(
+                        f"Provider returned missing shared path: {source}"
+                    )
                 shutil.copy2(source, destination)
                 return destination
             if data.get("url"):
@@ -182,7 +295,9 @@ class HTTPProvider:
                 downloaded.raise_for_status()
                 destination.write_bytes(downloaded.content)
                 return destination
-            raise RuntimeError(f"Provider returned no supported output field: {json.dumps(data)[:500]}")
+            raise RuntimeError(
+                f"Provider returned no supported output field: {json.dumps(data)[:500]}"
+            )
 
     def generate_image(self, job: ImageJob) -> Path:
         return self._post(
@@ -217,13 +332,15 @@ class HTTPProvider:
 
 
 def make_provider(settings: Settings) -> MediaProvider:
+    if settings.provider == "native":
+        return NativeProvider(settings)
     if settings.provider == "procedural":
         return ProceduralProvider(settings)
     if settings.provider == "http":
         return HTTPProvider(settings)
     raise ValueError(
         f"Unknown COSMOS_MEDIA_PROVIDER={settings.provider!r}. "
-        "Supported built-ins: procedural, http"
+        "Supported built-ins: native, procedural, http"
     )
 
 
