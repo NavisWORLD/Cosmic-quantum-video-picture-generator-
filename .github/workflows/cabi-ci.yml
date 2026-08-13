@@ -1,0 +1,19 @@
+name: COSMOS C ABI CI
+
+on:
+  pull_request:
+    paths: ["native/c_abi/**", "native/cpp/**", ".github/workflows/cabi-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["native/c_abi/**", "native/cpp/**", ".github/workflows/cabi-ci.yml"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S native/c_abi -B build/cabi
+      - run: cmake --build build/cabi --config Release
