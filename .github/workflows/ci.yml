@@ -13,7 +13,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - name: Install
+      - name: Install system media dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Install Python package
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[server,media,test]"
@@ -23,6 +27,17 @@ jobs:
         run: pytest
       - name: Smoke image
         run: cosmos-media image --prompt "CI cosmic garden" --seed 123 --width 320 --height 180 --out out/ci.png
+      - name: Smoke stitched video
+        run: cosmos-media video --prompt "CI continuous cosmic garden" --seed 321 --duration 1.0 --chunk-seconds 0.5 --overlap-seconds 0.1 --fps 12 --width 320 --height 180 --out out/ci-video.mp4
+      - name: Smoke storybook
+        run: cosmos-media storybook --context-file examples/story_context.txt --pages 2 --seed 777 --out out/ci-storybook
+      - name: Verify media artifacts
+        run: |
+          test -s out/ci.png
+          test -s out/ci-video.mp4
+          test -s out/ci-storybook/page-001.png
+          test -s out/ci-storybook/page-002.png
+          test -s out/ci-storybook/BOOK.md
       - name: Doctor
         run: cosmos-media doctor
 
