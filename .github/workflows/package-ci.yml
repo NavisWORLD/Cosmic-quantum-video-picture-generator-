@@ -1,0 +1,146 @@
+name: COSMOS Packaging CI
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "apps/pwa/**"
+      - "apps/mobile/**"
+      - "scripts/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - ".github/workflows/package-ci.yml"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Python build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[server,media,desktop]"
+      - name: Build one-click Windows installer
+        shell: pwsh
+        run: ./scripts/build_windows_installer.ps1 -Version 0.2.0
+      - name: Verify Windows installer
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/installer/COSMOS-Media-Setup-Windows-x86_64.exe")) { throw "installer missing" }
+          if ((Get-Item "dist/installer/COSMOS-Media-Setup-Windows-x86_64.exe").Length -lt 100000) { throw "installer unexpectedly small" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-ci-windows
+          path: dist/installer/COSMOS-Media-Setup-Windows-x86_64.exe
+          if-no-files-found: error
+
+  macos-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[server,media,desktop]"
+      - name: Build macOS app and DMG
+        run: bash scripts/build_macos.sh 0.2.0
+      - name: Verify macOS packages
+        run: |
+          test -d dist/COSMOS-Media.app
+          test -s dist/COSMOS-Media-macOS.dmg
+          test -s dist/COSMOS-Media-macOS.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-ci-macos
+          path: |
+            dist/COSMOS-Media-macOS.dmg
+            dist/COSMOS-Media-macOS.app.zip
+          if-no-files-found: error
+
+  android-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --no-audit --no-fund
+      - name: Generate Android project and branded assets
+        working-directory: apps/mobile
+        run: |
+          npx cap add android
+          npx @capacitor/assets generate --android --iconBackgroundColor '#090b17' --iconBackgroundColorDark '#090b17' --splashBackgroundColor '#090b17' --splashBackgroundColorDark '#090b17'
+          npx cap sync android
+      - name: Build Android APK
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+      - name: Verify Android APK
+        run: test -s apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-ci-android
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios-app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --no-audit --no-fund
+      - name: Generate iOS project and branded assets
+        working-directory: apps/mobile
+        run: |
+          npx cap add ios
+          npx @capacitor/assets generate --ios --iconBackgroundColor '#090b17' --iconBackgroundColorDark '#090b17' --splashBackgroundColor '#090b17' --splashBackgroundColorDark '#090b17'
+          npx cap sync ios
+      - name: Build unsigned iOS Simulator app
+        working-directory: apps/mobile
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath ios-build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          APP_PATH="$(find ios-build/Build/Products -type d -name 'App.app' | head -1)"
+          test -n "$APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" COSMOS-Media-iOS-Simulator.app.zip
+          ditto -c -k --sequesterRsrc --keepParent ios COSMOS-Media-iOS-Project.zip
+      - name: Verify iOS packages
+        working-directory: apps/mobile
+        run: |
+          test -s COSMOS-Media-iOS-Simulator.app.zip
+          test -s COSMOS-Media-iOS-Project.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-ci-ios
+          path: |
+            apps/mobile/COSMOS-Media-iOS-Simulator.app.zip
+            apps/mobile/COSMOS-Media-iOS-Project.zip
+          if-no-files-found: error
