@@ -46,7 +46,11 @@ class CosmosMediaEngine:
                 decay=float(hebbian_data.get("decay", 0.995)),
             )
             weights = hebbian_data.get("weights")
-            if isinstance(weights, list) and len(weights) == 12 and all(isinstance(row, list) and len(row) == 12 for row in weights):
+            if (
+                isinstance(weights, list)
+                and len(weights) == 12
+                and all(isinstance(row, list) and len(row) == 12 for row in weights)
+            ):
                 associator.weights = [[float(v) for v in row] for row in weights]
             return state, associator
         except Exception:
@@ -157,9 +161,16 @@ class CosmosMediaEngine:
             quantum=quantum_receipt,
         )
         receipt_path = receipt.write(run_dir / "receipt.json")
-        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        (run_dir / "state.json").write_text(
+            json.dumps(state.to_dict(), indent=2), encoding="utf-8"
+        )
         self._save_state()
-        return {"output": str(rendered), "receipt": str(receipt_path), "run_id": run_id, "state": state.to_dict()}
+        return {
+            "output": str(rendered),
+            "receipt": str(receipt_path),
+            "run_id": run_id,
+            "state": state.to_dict(),
+        }
 
     def generate_video(
         self,
@@ -178,43 +189,91 @@ class CosmosMediaEngine:
     ) -> dict[str, Any]:
         if not prompt.strip():
             raise ValueError("prompt must not be empty")
+
+        chunk_seconds_v = float(chunk_seconds or self.settings.chunk_seconds)
         chunks = plan_timeline(
             duration,
-            chunk_seconds=float(chunk_seconds or self.settings.chunk_seconds),
+            chunk_seconds=chunk_seconds_v,
             overlap_seconds=overlap_seconds,
         )
+        prompt_hash = sha256_text(prompt)
+        context_hash = sha256_text(context)
+
         if resume_run:
             run_id = resume_run
             run_dir = self.settings.home / "runs" / run_id
-            run_dir.mkdir(parents=True, exist_ok=True)
+            if not run_dir.exists():
+                raise ValueError(f"resume run does not exist: {run_id}")
         else:
             run_id, run_dir = self._new_run("video")
+
         chunk_dir = run_dir / "chunks"
         chunk_dir.mkdir(parents=True, exist_ok=True)
         destination = Path(output)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path = run_dir / "manifest.json"
 
-        base_seed, seed_hash, quantum_receipt = self._base_seed(
-            prompt=prompt,
-            context=context,
-            explicit_seed=seed,
-        )
         width_v = int(width or self.settings.width)
         height_v = int(height or self.settings.height)
         fps_v = int(fps or self.settings.fps)
+
+        if resume_run:
+            if not manifest_path.exists():
+                raise ValueError(
+                    f"resume run {run_id!r} has no manifest.json; refusing to sample a new base seed"
+                )
+            prior_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            checks = {
+                "prompt_hash": prompt_hash,
+                "context_hash": context_hash,
+                "duration": float(duration),
+                "chunk_seconds": chunk_seconds_v,
+                "fps": fps_v,
+                "width": width_v,
+                "height": height_v,
+                "provider": self.provider.name,
+            }
+            for key, expected in checks.items():
+                actual = prior_manifest.get(key)
+                if actual != expected:
+                    raise ValueError(
+                        f"resume mismatch for {key}: original={actual!r}, requested={expected!r}"
+                    )
+            if "base_seed" not in prior_manifest or "base_seed_hash" not in prior_manifest:
+                raise ValueError(
+                    "resume manifest predates deterministic-resume support; rerun with an explicit --seed"
+                )
+            base_seed = int(prior_manifest["base_seed"])
+            seed_hash = str(prior_manifest["base_seed_hash"])
+            quantum_receipt = QuantumReceipt(
+                mode="resume",
+                source="manifest-base-seed",
+                result_hash=seed_hash,
+            )
+        else:
+            base_seed, seed_hash, quantum_receipt = self._base_seed(
+                prompt=prompt,
+                context=context,
+                explicit_seed=seed,
+            )
+
         manifest: dict[str, Any] = {
             "run_id": run_id,
-            "prompt_hash": sha256_text(prompt),
-            "context_hash": sha256_text(context),
+            "prompt_hash": prompt_hash,
+            "context_hash": context_hash,
             "duration": float(duration),
-            "chunk_seconds": float(chunk_seconds or self.settings.chunk_seconds),
+            "chunk_seconds": chunk_seconds_v,
             "fps": fps_v,
             "width": width_v,
             "height": height_v,
             "provider": self.provider.name,
+            "base_seed": base_seed,
             "base_seed_hash": seed_hash,
             "chunks": [],
         }
+        # Persist the base seed before expensive work so an interruption after
+        # chunk zero can resume the exact same trajectory.
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         previous_output: str | None = None
         rendered_paths: list[Path] = []
@@ -227,21 +286,27 @@ class CosmosMediaEngine:
                 plan.start,
                 plan.duration,
             )
-            state = self._advance(
-                f"video|{prompt}|chunk={plan.index}|progress={plan.narrative_progress:.9f}|seed={chunk_seed}"
-            )
             chunk_path = chunk_dir / f"chunk-{plan.index:05d}.mp4"
-            continuity = {
-                "index": plan.index,
-                "start": plan.start,
-                "narrative_progress": plan.narrative_progress,
-                "overlap_before": plan.overlap_before,
-                "overlap_after": plan.overlap_after,
-                "previous_output": previous_output,
-                "state_hash": state.hash(),
-            }
             skipped = chunk_path.exists() and chunk_path.stat().st_size > 0
-            if not skipped:
+
+            if skipped:
+                # The persisted global state was advanced after every completed
+                # chunk in the original run. Do not advance it twice on resume.
+                state = self.state
+            else:
+                state = self._advance(
+                    f"video|{prompt}|chunk={plan.index}|"
+                    f"progress={plan.narrative_progress:.9f}|seed={chunk_seed}"
+                )
+                continuity = {
+                    "index": plan.index,
+                    "start": plan.start,
+                    "narrative_progress": plan.narrative_progress,
+                    "overlap_before": plan.overlap_before,
+                    "overlap_after": plan.overlap_after,
+                    "previous_output": previous_output,
+                    "state_hash": state.hash(),
+                }
                 self.provider.generate_video(
                     VideoJob(
                         prompt=prompt,
@@ -256,6 +321,8 @@ class CosmosMediaEngine:
                         continuity=continuity,
                     )
                 )
+                self._save_state()
+
             rendered_paths.append(chunk_path)
             previous_output = str(chunk_path)
             manifest["chunks"].append(
@@ -268,15 +335,14 @@ class CosmosMediaEngine:
                 }
             )
             # Persist progress after each chunk so interruption loses at most one clip.
-            (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-            self._save_state()
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         self._stitch(rendered_paths, destination, run_dir)
         receipt = GenerationReceipt(
             run_id=run_id,
             kind="video",
-            prompt_hash=sha256_text(prompt),
-            context_hash=sha256_text(context),
+            prompt_hash=prompt_hash,
+            context_hash=context_hash,
             state_hash=self.state.hash(),
             seed=base_seed,
             seed_hash=seed_hash,
@@ -284,7 +350,7 @@ class CosmosMediaEngine:
             parameters={
                 "duration": float(duration),
                 "chunks": len(chunks),
-                "chunk_seconds": float(chunk_seconds or self.settings.chunk_seconds),
+                "chunk_seconds": chunk_seconds_v,
                 "overlap_seconds": overlap_seconds,
                 "width": width_v,
                 "height": height_v,
@@ -297,7 +363,7 @@ class CosmosMediaEngine:
         return {
             "output": str(destination),
             "receipt": str(receipt_path),
-            "manifest": str(run_dir / "manifest.json"),
+            "manifest": str(manifest_path),
             "run_id": run_id,
             "chunks": len(chunks),
             "state": self.state.to_dict(),
@@ -309,17 +375,23 @@ class CosmosMediaEngine:
         if len(chunks) == 1:
             shutil.copy2(chunks[0], destination)
             return
+
         concat_file = run_dir / "concat.txt"
-        concat_file.write_text(
-            "\n".join(f"file '{path.resolve().as_posix().replace(chr(39), "'\\''")}'" for path in chunks) + "\n",
-            encoding="utf-8",
-        )
+        lines: list[str] = []
+        for path in chunks:
+            escaped = path.resolve().as_posix().replace("'", "'\\''")
+            lines.append(f"file '{escaped}'")
+        concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
         base = [
             self.settings.ffmpeg,
             "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(concat_file),
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
         ]
         copy_cmd = base + ["-c", "copy", "-movflags", "+faststart", str(destination)]
         try:
@@ -327,17 +399,24 @@ class CosmosMediaEngine:
             return
         except (FileNotFoundError, subprocess.CalledProcessError):
             pass
+
         transcode_cmd = base + [
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
             str(destination),
         ]
         try:
             subprocess.run(transcode_cmd, check=True, capture_output=True)
         except FileNotFoundError as exc:
-            raise RuntimeError("FFmpeg was not found. Install ffmpeg or set COSMOS_FFMPEG.") from exc
+            raise RuntimeError(
+                "FFmpeg was not found. Install ffmpeg or set COSMOS_FFMPEG."
+            ) from exc
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.decode("utf-8", errors="replace")[-2500:]
             raise RuntimeError(f"FFmpeg could not stitch chunks: {stderr}") from exc
@@ -372,7 +451,9 @@ class CosmosMediaEngine:
                 scene.page,
                 scene.image_prompt,
             )
-            state = self._advance(f"storybook|page={scene.page}|{scene.image_prompt}|{page_seed}")
+            state = self._advance(
+                f"storybook|page={scene.page}|{scene.image_prompt}|{page_seed}"
+            )
             page_path = destination / f"page-{scene.page:03d}.png"
             self.provider.generate_image(
                 ImageJob(
@@ -387,15 +468,25 @@ class CosmosMediaEngine:
             )
             outputs.append(str(page_path))
             record = scene.to_dict()
-            record.update({"image": str(page_path), "seed_hash": page_seed_hash, "state_hash": state.hash()})
+            record.update(
+                {
+                    "image": str(page_path),
+                    "seed_hash": page_seed_hash,
+                    "state_hash": state.hash(),
+                }
+            )
             scene_records.append(record)
             self._save_state()
 
         (destination / "storybook.json").write_text(
-            json.dumps({"title": title, "scenes": scene_records}, indent=2, ensure_ascii=False),
+            json.dumps(
+                {"title": title, "scenes": scene_records}, indent=2, ensure_ascii=False
+            ),
             encoding="utf-8",
         )
-        (destination / "BOOK.md").write_text(story_markdown(title, scenes), encoding="utf-8")
+        (destination / "BOOK.md").write_text(
+            story_markdown(title, scenes), encoding="utf-8"
+        )
         receipt = GenerationReceipt(
             run_id=run_id,
             kind="storybook",
@@ -419,7 +510,9 @@ class CosmosMediaEngine:
             "pages": len(scenes),
         }
 
-    def branch_search(self, prompt: str, count: int | None = None) -> list[dict[str, Any]]:
+    def branch_search(
+        self, prompt: str, count: int | None = None
+    ) -> list[dict[str, Any]]:
         return [
             candidate.to_dict()
             for candidate in search_branches(
