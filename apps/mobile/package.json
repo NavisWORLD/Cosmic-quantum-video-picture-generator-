@@ -1,0 +1,21 @@
+{
+  "name": "cosmos-media-mobile",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Native iPhone/Android shell for the COSMOS Media engine",
+  "scripts": {
+    "sync": "cap sync",
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "latest",
+    "@capacitor/core": "latest",
+    "@capacitor/ios": "latest"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "latest"
+  }
+}
