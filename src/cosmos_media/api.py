@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .config import Settings, load_env_file
 from .engine import CosmosMediaEngine
+from .integrator import CAPABILITIES
 
 load_env_file(".env")
 _settings = Settings()
@@ -39,7 +40,7 @@ def _resolve_pwa_dir() -> Path:
 app = FastAPI(
     title="COSMOS Quantum Media API",
     version="0.1.0",
-    description="Stateful image/video/storybook orchestration with optional IBM Quantum provenance",
+    description="Standalone/helper/bridge media engine with CST continuity and optional IBM Quantum provenance",
 )
 
 
@@ -97,6 +98,11 @@ def health() -> dict[str, Any]:
     return {"ok": True, "engine": "cosmos-quantum-media/0.1.0", "provider": _engine.provider.name}
 
 
+@app.get("/v1/capabilities")
+def capabilities() -> dict[str, Any]:
+    return {**CAPABILITIES, "provider": _engine.provider.name}
+
+
 @app.get("/v1/state")
 def state() -> dict[str, Any]:
     return _engine.state.to_dict()
@@ -115,6 +121,12 @@ def quantum() -> dict[str, Any]:
 @app.get("/v1/status")
 def status() -> dict[str, Any]:
     return _engine.status()
+
+
+@app.post("/v1/plan")
+def plan(request: BranchRequest) -> dict[str, Any]:
+    branches = _run(_engine.branch_search, request.prompt, request.count)
+    return {"selected": branches[0], "candidates": branches}
 
 
 @app.post("/v1/image")
@@ -166,7 +178,5 @@ def branches(request: BranchRequest) -> list[dict[str, Any]]:
     return _run(_engine.branch_search, request.prompt, request.count)
 
 
-# Keep API routes above mounts. Generated files remain restricted to the explicit
-# public out/ directory rather than exposing arbitrary filesystem paths.
 app.mount("/out", StaticFiles(directory="out", check_dir=False), name="outputs")
 app.mount("/app", StaticFiles(directory=str(_resolve_pwa_dir()), html=True, check_dir=False), name="pwa")
