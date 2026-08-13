@@ -51,16 +51,17 @@ class Settings:
     branches: int = field(default_factory=lambda: int(os.getenv("COSMOS_BRANCHES", "4")))
     seed_namespace: str = field(default_factory=lambda: os.getenv("COSMOS_SEED_NAMESPACE", "cosmos-media-v1"))
 
+    def __post_init__(self) -> None:
+        # A packaged desktop build includes imageio-ffmpeg. Resolve it during
+        # settings construction so existing render/stitch code transparently
+        # receives a real executable path on clean Windows/macOS installations.
+        self.ffmpeg = self.resolved_ffmpeg()
+
     def ensure_dirs(self) -> None:
         for name in ("runs", "cache", "state", "receipts"):
             (self.home / name).mkdir(parents=True, exist_ok=True)
 
     def resolved_ffmpeg(self) -> str:
-        """Resolve FFmpeg from an explicit path, PATH, or bundled imageio-ffmpeg.
-
-        The desktop distribution installs imageio-ffmpeg so clean Windows/macOS
-        installs can encode video without asking the user to separately install FFmpeg.
-        """
         explicit = self.ffmpeg.strip()
         if explicit and explicit != "ffmpeg":
             return explicit
@@ -81,7 +82,6 @@ class Settings:
             "media_endpoint": self.media_endpoint,
             "media_timeout": self.media_timeout,
             "ffmpeg": self.ffmpeg,
-            "ffmpeg_resolved": self.resolved_ffmpeg(),
             "api_host": self.api_host,
             "api_port": self.api_port,
             "quantum_mode": self.quantum_mode,
