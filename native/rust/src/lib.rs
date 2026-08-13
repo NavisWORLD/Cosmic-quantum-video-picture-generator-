@@ -133,8 +133,16 @@ pub fn plan_timeline(
             index,
             start,
             duration: length,
-            overlap_before: if index == 0 { 0.0 } else { overlap_seconds.min(length / 2.0) },
-            overlap_after: if index + 1 == count { 0.0 } else { overlap_seconds.min(length / 2.0) },
+            overlap_before: if index == 0 {
+                0.0
+            } else {
+                overlap_seconds.min(length / 2.0)
+            },
+            overlap_after: if index + 1 == count {
+                0.0
+            } else {
+                overlap_seconds.min(length / 2.0)
+            },
             narrative_progress: (start + length / 2.0) / duration,
         });
     }
