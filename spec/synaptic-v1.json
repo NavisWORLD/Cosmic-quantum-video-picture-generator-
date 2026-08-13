@@ -1,0 +1,23 @@
+{
+  "protocol": "cosmos.synaptic.v1",
+  "dimensions": 12,
+  "numeric_type": "IEEE-754 binary64",
+  "defaults": {
+    "omega": 0.37,
+    "damping": 0.82,
+    "gate": 0.33,
+    "recurrent_gain": 0.18,
+    "association_gain": 0.25,
+    "learning_rate": 0.04,
+    "decay": 0.995
+  },
+  "snapshot": {
+    "required": ["protocol", "dimensions", "step_index", "values", "weights"],
+    "values_length": 12,
+    "weights_shape": [12, 12]
+  },
+  "input_mapping": "SHA-256 of UTF-8 '0:' + input; consume big-endian unsigned 16-bit pairs; map each pair to [-1,1]; use first 12 values",
+  "projection": "bias[j] = tanh(sum(state[i] * weights[i][j]) / 12)",
+  "learning": "weights[i][j] = clamp(decay * weights[i][j] + learning_rate * before[i] * after[j], -1, 1)",
+  "scope": "software state and association protocol"
+}
