@@ -1,0 +1,11 @@
+services:
+  cosmos-media:
+    build: .
+    ports:
+      - "8788:8788"
+    env_file:
+      - .env
+    volumes:
+      - ./out:/app/out
+      - ./.cosmos-media:/app/.cosmos-media
+    restart: unless-stopped
