@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#090b17" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <title>COSMOS // Quantum Media</title>
+  <style>
+    :root { color-scheme: dark; --bg:#090b17; --panel:#10162a; --ink:#eef3ff; --muted:#a8b3d6; --line:#26325b; --glow:#8ef3d0; --hot:#a58bff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:radial-gradient(circle at 20% 0%,#1a2350 0,var(--bg) 42%); color:var(--ink); min-height:100vh; }
+    main { max-width:1100px; margin:auto; padding:28px 18px 80px; }
+    .hero { display:grid; gap:8px; margin-bottom:18px; }
+    .eyebrow { color:var(--glow); letter-spacing:.18em; font-size:.78rem; }
+    h1 { margin:.15rem 0; font-size:clamp(2rem,6vw,4.7rem); line-height:.92; }
+    .sub { color:var(--muted); max-width:780px; line-height:1.5; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+    .card { background:color-mix(in srgb,var(--panel) 92%,transparent); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 18px 60px #0005; }
+    label { display:block; color:var(--muted); font-size:.78rem; margin:11px 0 6px; }
+    textarea,input,select,button { width:100%; border-radius:12px; border:1px solid var(--line); background:#090e20; color:var(--ink); padding:12px; font:inherit; }
+    textarea { min-height:112px; resize:vertical; }
+    button { cursor:pointer; background:linear-gradient(120deg,#1c3650,#2b2461); border-color:#4a5689; font-weight:700; margin-top:12px; }
+    button:hover { border-color:var(--glow); }
+    button:disabled { opacity:.55; cursor:progress; }
+    .status { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 0; }
+    .pill { border:1px solid var(--line); border-radius:999px; padding:6px 9px; color:var(--muted); font-size:.75rem; }
+    .pill.ok { color:var(--glow); }
+    pre { white-space:pre-wrap; word-break:break-word; background:#050812; padding:12px; border-radius:12px; border:1px solid var(--line); min-height:130px; max-height:420px; overflow:auto; }
+    img,video { display:block; width:100%; border-radius:14px; border:1px solid var(--line); margin-top:12px; background:#000; }
+    .tiny { color:var(--muted); font-size:.75rem; line-height:1.45; }
+    a { color:var(--glow); }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="eyebrow">COSMOS // CST // QUANTUM MEDIA ENGINE</div>
+    <h1>Make a universe.<br/>Keep its memory.</h1>
+    <div class="sub">Stateful image, long-form video, storybook, branch-search, and optional IBM Quantum provenance. The attached media provider determines visual realism; COSMOS carries continuity, state, seeds, receipts, and the long timeline.</div>
+    <div class="status" id="status"><span class="pill">checking engine…</span></div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Create</h2>
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="image">Image</option>
+        <option value="video">Video</option>
+        <option value="storybook">Storybook</option>
+        <option value="branch">Branch search</option>
+      </select>
+      <label for="prompt">Prompt / title</label>
+      <textarea id="prompt" placeholder="A vast impossible garden inside a glass moon…"></textarea>
+      <label for="context">Source context</label>
+      <textarea id="context" placeholder="Paste story, scene, character, classroom, project, or user context here."></textarea>
+      <div id="videoFields">
+        <label for="duration">Video duration (seconds, up to your compute/storage budget)</label>
+        <input id="duration" type="number" min="0.1" step="0.1" value="8" />
+      </div>
+      <div id="storyFields">
+        <label for="pages">Storybook pages</label>
+        <input id="pages" type="number" min="1" max="64" value="8" />
+      </div>
+      <button id="go">GENERATE // CONTINUE THE TIMELINE</button>
+      <p class="tiny">For one hour, enter <strong>3600</strong>. COSMOS will chunk and stitch the timeline; rendering cost and time belong to the provider you attach.</p>
+    </div>
+
+    <div class="card">
+      <h2>Output</h2>
+      <div id="preview"></div>
+      <pre id="result">No generation yet.</pre>
+    </div>
+  </section>
+</main>
+<script src="app.js" type="module"></script>
+</body>
+</html>
