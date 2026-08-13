@@ -32,7 +32,7 @@ Source: "..\..\dist\cosmos-media.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{autoprograms}\COSMOS Media"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\COSMOS Media"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{autoprograms}\COSMOS Media CLI"; Filename: "{cmd}"; Parameters: "/K \"\"{app}\cosmos-media.exe\" status\""; WorkingDir: "{app}"
+Name: "{autoprograms}\COSMOS Media CLI Status"; Filename: "{app}\cosmos-media.exe"; Parameters: "status"; WorkingDir: "{app}"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
