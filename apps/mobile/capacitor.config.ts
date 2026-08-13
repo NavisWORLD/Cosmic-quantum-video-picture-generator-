@@ -8,12 +8,7 @@ const config: CapacitorConfig = {
     cleartext: true
   },
   android: {
-    allowMixedContent: true,
-    backgroundColor: '#090b17'
-  },
-  ios: {
-    backgroundColor: '#090b17',
-    contentInset: 'automatic'
+    allowMixedContent: true
   }
 };
 
