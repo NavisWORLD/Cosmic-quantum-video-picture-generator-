@@ -8,6 +8,7 @@ import sys
 
 from .config import Settings, load_env_file
 from .engine import CosmosMediaEngine
+from .integrator import CAPABILITIES, handle_request, run_stdio
 
 
 def _json(value) -> None:
@@ -17,13 +18,14 @@ def _json(value) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cosmos-media",
-        description="COSMOS/CST stateful image, video and storybook generation orchestrator",
+        description="COSMOS/CST standalone media engine, helper, and integration bridge",
     )
     parser.add_argument("--env", default=".env", help="optional KEY=VALUE environment file")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("status", help="show engine/provider/quantum/state status")
     sub.add_parser("doctor", help="check local runtime dependencies")
+    sub.add_parser("capabilities", help="print machine-readable integration capabilities")
 
     reset = sub.add_parser("reset-state", help="reset persistent CST state")
     reset.add_argument("--context", default="")
@@ -62,6 +64,20 @@ def build_parser() -> argparse.ArgumentParser:
     branch.add_argument("--prompt", required=True)
     branch.add_argument("--count", type=int)
 
+    bridge = sub.add_parser(
+        "bridge",
+        help="JSON integration bridge for external apps, agents, renderers, and CLIs",
+    )
+    bridge.add_argument(
+        "--stdio",
+        action="store_true",
+        help="persistent JSONL stdin/stdout mode; one request and response per line",
+    )
+    bridge.add_argument(
+        "--request",
+        help="one-shot JSON request; if omitted and --stdio is not set, read one JSON object from stdin",
+    )
+
     serve = sub.add_parser("serve", help="run the FastAPI integration server")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
@@ -75,6 +91,7 @@ def doctor(settings: Settings) -> dict[str, object]:
         "provider": settings.provider,
         "ffmpeg": shutil.which(settings.ffmpeg),
         "home": str(settings.home),
+        "modes": ["standalone", "helper", "bridge"],
     }
     try:
         import PIL  # noqa: F401
@@ -96,8 +113,9 @@ def doctor(settings: Settings) -> dict[str, object]:
         checks["qiskit_ibm_runtime"] = True
     except ImportError:
         checks["qiskit_ibm_runtime"] = False
-    checks["ready_for_procedural_image"] = bool(checks["pillow"])
-    checks["ready_for_procedural_video"] = bool(checks["pillow"] and checks["ffmpeg"])
+    checks["ready_for_native_image"] = bool(checks["pillow"])
+    checks["ready_for_native_video"] = bool(checks["pillow"] and checks["ffmpeg"])
+    checks["ready_for_http_bridge"] = bool(checks["httpx"])
     return checks
 
 
@@ -110,6 +128,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         _json(doctor(settings))
         return 0
+    if args.command == "capabilities":
+        _json(CAPABILITIES)
+        return 0
     if args.command == "serve":
         try:
             import uvicorn
@@ -121,6 +142,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     engine = CosmosMediaEngine(settings)
+    if args.command == "bridge":
+        if args.stdio:
+            return run_stdio(engine, sys.stdin, sys.stdout)
+        raw = args.request if args.request is not None else sys.stdin.read()
+        try:
+            request = json.loads(raw)
+            if not isinstance(request, dict):
+                raise ValueError("bridge request must be a JSON object")
+            _json(handle_request(engine, request))
+            return 0
+        except Exception as exc:
+            _json({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+            return 2
+
     if args.command == "status":
         _json(engine.status())
     elif args.command == "reset-state":
