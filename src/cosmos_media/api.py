@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import sys
 from threading import Lock
 from typing import Any
 
@@ -17,6 +19,22 @@ _engine = CosmosMediaEngine(_settings)
 _lock = Lock()
 
 Path("out").mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_pwa_dir() -> Path:
+    configured = os.getenv("COSMOS_PWA_DIR")
+    if configured:
+        return Path(configured)
+    local = Path("apps/pwa")
+    if local.exists():
+        return local
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        bundled = Path(bundle_root) / "apps" / "pwa"
+        if bundled.exists():
+            return bundled
+    return local
+
 
 app = FastAPI(
     title="COSMOS Quantum Media API",
@@ -151,4 +169,4 @@ def branches(request: BranchRequest) -> list[dict[str, Any]]:
 # Keep API routes above mounts. Generated files remain restricted to the explicit
 # public out/ directory rather than exposing arbitrary filesystem paths.
 app.mount("/out", StaticFiles(directory="out", check_dir=False), name="outputs")
-app.mount("/app", StaticFiles(directory="apps/pwa", html=True, check_dir=False), name="pwa")
+app.mount("/app", StaticFiles(directory=str(_resolve_pwa_dir()), html=True, check_dir=False), name="pwa")
