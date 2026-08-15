@@ -5,9 +5,9 @@ type: software
 authors:
   - family-names: Davis
     given-names: Cory
-version: 0.1.0
-date-released: 2026-08-12
-license: Apache-2.0
+version: 0.2.0
+date-released: 2026-08-15
+license: "LicenseRef-Cory-Davis-Quantum-Source-1.0"
 repository-code: "https://github.com/NavisWORLD/Cosmic-quantum-video-picture-generator-"
 identifiers:
   - type: doi
