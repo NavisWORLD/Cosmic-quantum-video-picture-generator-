@@ -2,9 +2,11 @@
 
 COSMOS // Cosmic Quantum Video & Picture Generator
 
-Copyright 2026 Cory Davis / NavisWORLD.
+Copyright © 2026 Cory Shane Davis / NavisWORLD.
 
-Licensed under the Apache License, Version 2.0.
+Current covered Cory-owned original material is distributed under the repository's restricted source rights notice. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
+
+Historical copies or versions validly distributed under Apache License 2.0 retain the rights granted to those copies. The current notice does not revoke those historical grants.
 
 ## Project lineage
 
