@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "COSMOS/CST stateful image, video and storybook engine with native rendering and optional IBM Quantum provenance"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = {text = "Proprietary - see LICENSE and LICENSE_HISTORY.md"}
 authors = [{name = "Cory Davis / NavisWORLD"}]
 dependencies = []
 classifiers = [
@@ -16,7 +16,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent"
 ]
 
