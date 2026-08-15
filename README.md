@@ -4,6 +4,12 @@
 
 > Status: **research + engineering release**. COSMOS now ships with its own first-party image/video synthesizer, a pluggable external-provider protocol, long-form timeline rendering, storybook generation, CST-inspired state evolution, Rust/C++ reference cores, an installable PWA, CLI/JSONL integration bridge, tests, CI, and IBM Quantum integration hooks. External model weights are optional and intentionally not bundled.
 
+## Current rights boundary
+
+Current and future Cory-owned original material expressly distributed under this repository's current `LICENSE` is **not offered for general commercial reuse, redistribution, modification, derivative-work creation, or incorporation into other products without separate written permission**. Historical copies previously distributed under Apache-2.0 retain the rights validly granted to those copies. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
+
+Third-party libraries, SDKs, providers, models, datasets, weights, and tools retain their own licenses and terms.
+
 ## What this actually is
 
 COSMOS Media is a complete generation **engine and integration layer**, not merely a wrapper around somebody else's renderer. It can operate alone or sit behind another creative application.
@@ -282,7 +288,11 @@ This public build preserves the COSMOS / Cosmic Synapse Theory project lineage a
 
 ## License
 
-Apache License 2.0. See `LICENSE` and `NOTICE.md`. Third-party models, providers, datasets and SDKs retain their own licenses and terms. No external model weights are sublicensed by this repository.
+Current covered Cory-owned original material is distributed under the repository's restricted source rights notice. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
+
+Historical copies or versions validly distributed under Apache License 2.0 retain the rights granted to those copies. The current rights notice does not revoke those historical grants.
+
+Third-party models, providers, datasets, SDKs, weights, and tools retain their own licenses and terms. No external model weights are sublicensed by this repository.
 
 ## Safety and privacy
 
