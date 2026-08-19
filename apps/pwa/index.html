@@ -19,11 +19,14 @@
     .eyebrow { color:var(--glow); letter-spacing:.18em; font-size:.78rem; }
     h1 { margin:.15rem 0; font-size:clamp(2rem,6vw,4.7rem); line-height:.92; }
     h2 { margin-top:0; }
-    .sub { color:var(--muted); max-width:820px; line-height:1.5; }
+    .sub { color:var(--muted); max-width:880px; line-height:1.5; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; align-items:start; }
     .card { background:color-mix(in srgb,var(--panel) 92%,transparent); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 18px 60px #0005; backdrop-filter:blur(16px); }
     label { display:block; color:var(--muted); font-size:.78rem; margin:11px 0 6px; }
     textarea,input,select,button { width:100%; border-radius:12px; border:1px solid var(--line); background:#090e20; color:var(--ink); padding:12px; font:inherit; }
+    input[type="checkbox"] { width:auto; accent-color:var(--glow); }
+    input[type="range"] { padding:5px 0; }
+    input[type="file"] { padding:9px; }
     textarea { min-height:112px; resize:vertical; }
     button { cursor:pointer; background:linear-gradient(120deg,#1c3650,#2b2461); border-color:#4a5689; font-weight:700; margin-top:12px; min-height:46px; }
     button.secondary { background:#0b1124; }
@@ -38,6 +41,11 @@
     .tiny { color:var(--muted); font-size:.75rem; line-height:1.45; }
     .connection { border-top:1px solid var(--line); margin-top:14px; padding-top:6px; }
     .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .checkrow { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; }
+    .checkrow label { display:flex; align-items:center; gap:7px; margin:0; color:var(--ink); }
+    .source-preview { border:1px dashed var(--line); border-radius:14px; padding:10px; margin-top:10px; min-height:44px; }
+    .source-preview:empty::before { content:"Upload preview appears here."; color:var(--muted); font-size:.75rem; }
+    .model-note { border-left:2px solid var(--glow); padding-left:10px; margin-top:10px; }
     a { color:var(--glow); }
     @media (max-width:620px) {
       main { padding-top:20px; }
@@ -51,26 +59,54 @@
 <body>
 <main>
   <section class="hero">
-    <div class="eyebrow">COSMOS // CST // QUANTUM MEDIA ENGINE</div>
-    <h1>Make a universe.<br/>Keep its memory.</h1>
-    <div class="sub">First-party image and video synthesis, long-form continuity, storybooks, branch search, persistent CST state, and optional IBM Quantum provenance. Run COSMOS alone or connect this app to a COSMOS engine on another machine.</div>
+    <div class="eyebrow">COSMOS // CST // SYNAPTIC // QUANTUM MEDIA ENGINE</div>
+    <h1>Create it.<br/>Or rewrite what exists.</h1>
+    <div class="sub">Generate images, video and storybooks, or upload existing media and transform it from a prompt. COSMOS Main is the default controller identity, Synaptic/CST state carries continuity, and the actual visual renderer remains switchable and explicitly reported.</div>
     <div class="status" id="status"><span class="pill">checking engine…</span></div>
   </section>
 
   <section class="grid">
     <div class="card">
-      <h2>Create</h2>
+      <h2>Create / Edit</h2>
       <label for="mode">Mode</label>
       <select id="mode">
-        <option value="image">Image</option>
-        <option value="video">Video</option>
+        <option value="image">Generate Image</option>
+        <option value="video">Generate Video</option>
+        <option value="edit-image">Edit Uploaded Image</option>
+        <option value="edit-video">Edit Uploaded Video</option>
         <option value="storybook">Storybook</option>
         <option value="branch">Branch search</option>
       </select>
+
+      <div id="editFields" hidden>
+        <label for="mediaFile">Source media</label>
+        <input id="mediaFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,.m4v" />
+        <div class="source-preview" id="sourcePreview"></div>
+
+        <label for="modelSelect">Edit model</label>
+        <select id="modelSelect">
+          <option value="cosmos-main">COSMOS Main</option>
+        </select>
+        <div class="tiny model-note" id="modelNote">COSMOS Main uses QC67 as the controller identity and reports the renderer that actually changes pixels.</div>
+
+        <label for="strength">Edit strength <span id="strengthValue">0.50</span></label>
+        <input id="strength" type="range" min="0" max="1" step="0.05" value="0.50" />
+
+        <label for="negativePrompt">Negative prompt / avoid</label>
+        <textarea id="negativePrompt" placeholder="flicker, blur, unwanted color cast…"></textarea>
+
+        <div class="checkrow">
+          <label><input id="preserveSubject" type="checkbox" checked /> Preserve subject</label>
+          <label id="audioCheck"><input id="preserveAudio" type="checkbox" checked /> Preserve audio</label>
+        </div>
+      </div>
+
       <label for="prompt">Prompt / title</label>
-      <textarea id="prompt" placeholder="A vast impossible garden inside a glass moon…"></textarea>
-      <label for="context">Source context</label>
-      <textarea id="context" placeholder="Paste story, scene, character, classroom, project, or user context here."></textarea>
+      <textarea id="prompt" placeholder="Make this cinematic, moonlit and electric…"></textarea>
+      <div id="contextFields">
+        <label for="context">Source context</label>
+        <textarea id="context" placeholder="Paste story, scene, character, classroom, project, or user context here."></textarea>
+      </div>
       <div id="videoFields">
         <label for="duration">Video duration (seconds)</label>
         <input id="duration" type="number" min="0.1" step="0.1" value="8" />
@@ -80,7 +116,7 @@
         <input id="pages" type="number" min="1" max="64" value="8" />
       </div>
       <button id="go">GENERATE // CONTINUE THE TIMELINE</button>
-      <p class="tiny">For one hour enter <strong>3600</strong>. COSMOS renders bounded chunks, checkpoints the creative state, and stitches the timeline.</p>
+      <p class="tiny" id="actionHelp">For one hour enter <strong>3600</strong>. COSMOS renders bounded chunks, checkpoints the creative state, and stitches the timeline.</p>
     </div>
 
     <div class="card">
@@ -101,7 +137,7 @@
       <h2>Output</h2>
       <div id="preview"></div>
       <button class="secondary" id="shareOutput" hidden>SHARE OUTPUT</button>
-      <pre id="result">No generation yet.</pre>
+      <pre id="result">No generation or edit yet.</pre>
     </div>
   </section>
 </main>

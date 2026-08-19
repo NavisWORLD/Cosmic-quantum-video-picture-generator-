@@ -6,19 +6,21 @@ import sys
 from threading import Lock
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
 from .config import Settings, load_env_file
+from .editing import EditingService
 from .engine import CosmosMediaEngine
 from .integrator import CAPABILITIES
 
 load_env_file(".env")
 _settings = Settings()
 _engine = CosmosMediaEngine(_settings)
+_editing = EditingService(_settings)
 _lock = Lock()
 
 Path("out").mkdir(parents=True, exist_ok=True)
@@ -43,9 +45,6 @@ def _cors_origins() -> list[str]:
     configured = os.getenv("COSMOS_CORS_ORIGINS", "").strip()
     if configured:
         return [value.strip() for value in configured.split(",") if value.strip()]
-    # Capacitor uses local WebView origins. Browser/PWA same-origin calls do not
-    # require CORS, while these defaults let packaged mobile clients reach a
-    # COSMOS engine on the user's LAN or trusted deployment.
     return [
         "capacitor://localhost",
         "ionic://localhost",
@@ -57,7 +56,10 @@ def _cors_origins() -> list[str]:
 app = FastAPI(
     title="COSMOS Quantum Media API",
     version=__version__,
-    description="Standalone/helper/bridge media engine with CST continuity and optional IBM Quantum provenance",
+    description=(
+        "Standalone/helper/bridge media engine with generation, prompt-driven upload editing, "
+        "CST/Synaptic continuity, switchable models, and optional IBM Quantum provenance"
+    ),
 )
 
 app.add_middleware(
@@ -110,6 +112,31 @@ class ResetRequest(BaseModel):
     context: str = ""
 
 
+class DefaultModelRequest(BaseModel):
+    model: str = Field(min_length=1)
+
+
+class ImageEditRequest(BaseModel):
+    asset_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    output: str | None = None
+    model: str | None = None
+    negative_prompt: str = ""
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+    preserve_subject: bool = True
+
+
+class VideoEditRequest(BaseModel):
+    asset_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    output: str | None = None
+    model: str | None = None
+    negative_prompt: str = ""
+    strength: float = Field(default=0.45, ge=0.0, le=1.0)
+    preserve_subject: bool = True
+    preserve_audio: bool = True
+
+
 def _run(fn, *args, **kwargs):
     try:
         with _lock:
@@ -120,12 +147,22 @@ def _run(fn, *args, **kwargs):
 
 @app.get("/v1/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "engine": f"cosmos-quantum-media/{__version__}", "provider": _engine.provider.name}
+    return {
+        "ok": True,
+        "engine": f"cosmos-quantum-media/{__version__}",
+        "provider": _engine.provider.name,
+        "default_model": _editing.registry.default_id,
+    }
 
 
 @app.get("/v1/capabilities")
 def capabilities() -> dict[str, Any]:
-    return {**CAPABILITIES, "provider": _engine.provider.name, "version": __version__}
+    return {
+        **CAPABILITIES,
+        "provider": _engine.provider.name,
+        "version": __version__,
+        "editing": _editing.models(),
+    }
 
 
 @app.get("/v1/state")
@@ -145,7 +182,71 @@ def quantum() -> dict[str, Any]:
 
 @app.get("/v1/status")
 def status() -> dict[str, Any]:
-    return _engine.status()
+    data = _engine.status()
+    data["editing"] = _editing.models()
+    return data
+
+
+@app.get("/v1/models")
+def models() -> dict[str, Any]:
+    return _editing.models()
+
+
+@app.post("/v1/models/default")
+def set_default_model(request: DefaultModelRequest) -> dict[str, Any]:
+    return _run(_editing.set_default_model, request.model)
+
+
+@app.post("/v1/uploads")
+async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
+    filename = file.filename or "upload"
+    maximum = int(_settings.max_upload_mb) * 1024 * 1024
+    data = await file.read(maximum + 1)
+    if len(data) > maximum:
+        raise HTTPException(
+            status_code=413,
+            detail=f"upload exceeds {_settings.max_upload_mb} MB limit",
+        )
+    return _run(_editing.store_upload, filename, data)
+
+
+@app.get("/v1/assets/{asset_id}")
+def asset(asset_id: str) -> dict[str, Any]:
+    return _run(_editing.asset, asset_id)
+
+
+@app.get("/v1/edit/jobs/{job_id}")
+def edit_job(job_id: str) -> dict[str, Any]:
+    return _run(_editing.job, job_id)
+
+
+@app.post("/v1/edit/image")
+def edit_image(request: ImageEditRequest) -> dict[str, Any]:
+    return _run(
+        _editing.edit_image,
+        request.asset_id,
+        request.prompt,
+        request.output,
+        model=request.model,
+        negative_prompt=request.negative_prompt,
+        strength=request.strength,
+        preserve_subject=request.preserve_subject,
+    )
+
+
+@app.post("/v1/edit/video")
+def edit_video(request: VideoEditRequest) -> dict[str, Any]:
+    return _run(
+        _editing.edit_video,
+        request.asset_id,
+        request.prompt,
+        request.output,
+        model=request.model,
+        negative_prompt=request.negative_prompt,
+        strength=request.strength,
+        preserve_subject=request.preserve_subject,
+        preserve_audio=request.preserve_audio,
+    )
 
 
 @app.post("/v1/plan")

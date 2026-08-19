@@ -25,28 +25,43 @@ jobs:
         run: python -m compileall -q src
       - name: Test
         run: pytest
-      - name: Verify default provider is native
+      - name: Verify default provider and model
         run: |
           cosmos-media status > out-status.json
+          cosmos-media models default > out-model.json
           grep '"provider": "native"' out-status.json
+          grep '"default_model": "cosmos-main"' out-model.json
+          grep 'phera-ra/QC67_cosmo' out-model.json
       - name: Smoke native image
         run: cosmos-media image --prompt "a luminous world tree above an alien ocean with floating islands and an observatory" --context "two moons, deep space, living memory" --seed 123 --width 640 --height 360 --out out/ci-native.png
+      - name: Smoke COSMOS Main image edit
+        run: cosmos-media edit-image --input out/ci-native.png --prompt "warm cinematic neon moonlight" --model cosmos-main --strength 0.70 --out out/ci-edited.png
       - name: Smoke native stitched video
         run: cosmos-media video --prompt "a continuous flight through a luminous cosmic garden above an alien ocean" --context "floating islands, world tree, stars, reflections" --seed 321 --duration 1.0 --chunk-seconds 0.5 --overlap-seconds 0.1 --fps 12 --width 320 --height 180 --out out/ci-native-video.mp4
+      - name: Smoke native video edit
+        run: cosmos-media edit-video --input out/ci-native-video.mp4 --prompt "cool cinematic electric night" --model native-edit --strength 0.55 --out out/ci-edited-video.mp4
       - name: Smoke native storybook
         run: cosmos-media storybook --context-file examples/story_context.txt --pages 2 --seed 777 --out out/ci-native-storybook
       - name: Smoke JSONL bridge
         run: |
-          printf '%s\n' '{"id":"caps","op":"capabilities"}' '{"id":"plan","op":"plan","prompt":"continue the luminous world"}' | cosmos-media bridge --stdio > out/ci-bridge.jsonl
+          printf '%s\n' '{"id":"caps","op":"capabilities"}' '{"id":"models","op":"models"}' '{"id":"plan","op":"plan","prompt":"continue the luminous world"}' | cosmos-media bridge --stdio > out/ci-bridge.jsonl
           grep '"ok":true' out/ci-bridge.jsonl
+          grep 'cosmos-main' out/ci-bridge.jsonl
       - name: Verify media artifacts
         run: |
           test -s out/ci-native.png
+          test -s out/ci-edited.png
           test -s out/ci-native-video.mp4
+          test -s out/ci-edited-video.mp4
           test -s out/ci-native-storybook/page-001.png
           test -s out/ci-native-storybook/page-002.png
           test -s out/ci-native-storybook/BOOK.md
           test -s out/ci-bridge.jsonl
+          test -s out-model.json
+          if cmp -s out/ci-native.png out/ci-edited.png; then
+            echo "edited image unexpectedly identical"
+            exit 1
+          fi
       - name: Doctor
         run: cosmos-media doctor
       - name: Upload native proof artifacts
@@ -57,10 +72,13 @@ jobs:
           if-no-files-found: warn
           path: |
             out/ci-native.png
+            out/ci-edited.png
             out/ci-native-video.mp4
+            out/ci-edited-video.mp4
             out/ci-native-storybook/
             out/ci-bridge.jsonl
             out-status.json
+            out-model.json
 
   rust:
     runs-on: ubuntu-latest

@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Davis
     given-names: Cory
-version: 0.2.0
-date-released: 2026-08-15
+version: 0.3.0
+date-released: 2026-08-19
 license: "LicenseRef-Cory-Davis-Quantum-Source-1.0"
 repository-code: "https://github.com/NavisWORLD/Cosmic-quantum-video-picture-generator-"
 identifiers:
@@ -17,6 +17,9 @@ keywords:
   - generative media
   - image generation
   - video generation
+  - media editing
+  - prompt editing
+  - synaptic continuity
   - quantum provenance
   - CST
   - COSMOS

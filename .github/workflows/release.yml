@@ -13,12 +13,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: cosmos-media-v0.2.0-release
+  group: cosmos-media-v0.3.0-release
   cancel-in-progress: false
 
 env:
-  COSMOS_VERSION: "0.2.0"
-  COSMOS_TAG: "v0.2.0"
+  COSMOS_VERSION: "0.3.0"
+  COSMOS_TAG: "v0.3.0"
 
 jobs:
   windows:
@@ -224,9 +224,16 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            ## COSMOS Media v0.2.0
+            ## COSMOS Media v0.3.0
 
-            Cross-platform packaged release of the standalone COSMOS image/video/storybook engine and integration bridge.
+            Adds prompt-driven editing for uploaded images and videos across the desktop app, PWA, Android/iOS shell, CLI, REST API, and JSONL bridge.
+
+            ### Editing + model routing
+            - `COSMOS Main` is the default edit model identity.
+            - `phera-ra/QC67_cosmo` is recorded as the COSMOS Main controller/planner identity; its published task is text generation, so the release does not falsely claim it directly synthesizes pixels.
+            - The actual edit renderer is switchable: built-in `native` Pillow/FFmpeg transforms or an external semantic `http` edit backend.
+            - Every edit receipt records the chosen model, controller identity, actual renderer, source/output hashes, and Synaptic state hash.
+            - Image/video uploads are available directly in the shared app UI.
 
             ### Desktop
             - Windows one-click installer: `COSMOS-Media-Setup-Windows-x86_64.exe`
@@ -239,8 +246,8 @@ jobs:
             - Android installable APK: `COSMOS-Media-Android.apk`
             - iOS Simulator application archive
             - generated iOS Xcode project for physical-device/App Store signing
-            - the same UI remains directly installable as a PWA on iPhone/Android.
+            - the same interface remains directly installable as a PWA on iPhone/Android.
 
-            Physical iPhone/App Store installation requires Apple signing and provisioning credentials owned by the publisher; no private signing material is committed to the repository.
+            Physical iPhone/App Store installation requires Apple signing and provisioning credentials owned by the publisher; no private signing material is committed to this repository.
           files: release-assets/*
           fail_on_unmatched_files: true

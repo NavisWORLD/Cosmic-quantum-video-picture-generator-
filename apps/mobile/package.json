@@ -1,8 +1,8 @@
 {
   "name": "cosmos-media-mobile",
   "private": true,
-  "version": "0.2.0",
-  "description": "Native iPhone/Android shell for the COSMOS Media engine",
+  "version": "0.3.0",
+  "description": "Native iPhone/Android shell for the COSMOS Media generation and prompt-edit engine",
   "scripts": {
     "sync": "cap sync",
     "add:android": "cap add android",
