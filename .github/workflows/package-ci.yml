@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  COSMOS_VERSION: "0.3.0"
+
 jobs:
   windows-installer:
     runs-on: windows-latest
@@ -30,7 +33,7 @@ jobs:
           pip install -e ".[server,media,desktop]"
       - name: Build one-click Windows installer
         shell: pwsh
-        run: ./scripts/build_windows_installer.ps1 -Version 0.2.0
+        run: ./scripts/build_windows_installer.ps1 -Version $env:COSMOS_VERSION
       - name: Verify Windows installer
         shell: pwsh
         run: |
@@ -54,7 +57,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[server,media,desktop]"
       - name: Build macOS app and DMG
-        run: bash scripts/build_macos.sh 0.2.0
+        run: bash scripts/build_macos.sh "$COSMOS_VERSION"
       - name: Verify macOS packages
         run: |
           test -d dist/COSMOS-Media.app
