@@ -51,14 +51,25 @@ class Settings:
     branches: int = field(default_factory=lambda: int(os.getenv("COSMOS_BRANCHES", "4")))
     seed_namespace: str = field(default_factory=lambda: os.getenv("COSMOS_SEED_NAMESPACE", "cosmos-media-v1"))
 
+    # Editing/model configuration. COSMOS Main is a controller identity while
+    # edit_renderer names the implementation that actually changes pixels.
+    default_model: str = field(default_factory=lambda: os.getenv("COSMOS_DEFAULT_MODEL", "cosmos-main").strip().lower())
+    edit_renderer: str = field(default_factory=lambda: os.getenv("COSMOS_EDIT_RENDERER", "native").strip().lower())
+    edit_endpoint: str = field(default_factory=lambda: os.getenv("COSMOS_EDIT_ENDPOINT", "").rstrip("/"))
+    max_upload_mb: int = field(default_factory=lambda: int(os.getenv("COSMOS_MAX_UPLOAD_MB", "256")))
+
     def __post_init__(self) -> None:
         # A packaged desktop build includes imageio-ffmpeg. Resolve it during
-        # settings construction so existing render/stitch code transparently
-        # receives a real executable path on clean Windows/macOS installations.
+        # settings construction so existing render/stitch/edit code receives a
+        # real executable path on clean Windows/macOS installations.
         self.ffmpeg = self.resolved_ffmpeg()
+        if self.max_upload_mb <= 0:
+            raise ValueError("COSMOS_MAX_UPLOAD_MB must be positive")
+        if self.edit_renderer not in {"native", "http"}:
+            raise ValueError("COSMOS_EDIT_RENDERER must be 'native' or 'http'")
 
     def ensure_dirs(self) -> None:
-        for name in ("runs", "cache", "state", "receipts"):
+        for name in ("runs", "cache", "state", "receipts", "assets", "edit_jobs"):
             (self.home / name).mkdir(parents=True, exist_ok=True)
 
     def resolved_ffmpeg(self) -> str:
@@ -96,4 +107,8 @@ class Settings:
             "chunk_seconds": self.chunk_seconds,
             "branches": self.branches,
             "seed_namespace": self.seed_namespace,
+            "default_model": self.default_model,
+            "edit_renderer": self.edit_renderer,
+            "edit_endpoint_configured": bool(self.edit_endpoint),
+            "max_upload_mb": self.max_upload_mb,
         }
