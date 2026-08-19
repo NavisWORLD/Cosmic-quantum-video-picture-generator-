@@ -7,6 +7,7 @@ import shutil
 import sys
 
 from .config import Settings, load_env_file
+from .editing import EditingService
 from .engine import CosmosMediaEngine
 from .integrator import CAPABILITIES, handle_request, run_stdio
 
@@ -18,12 +19,12 @@ def _json(value) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cosmos-media",
-        description="COSMOS/CST standalone media engine, helper, and integration bridge",
+        description="COSMOS/CST standalone media engine, editor, helper, and integration bridge",
     )
     parser.add_argument("--env", default=".env", help="optional KEY=VALUE environment file")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("status", help="show engine/provider/quantum/state status")
+    sub.add_parser("status", help="show engine/provider/quantum/edit/model status")
     sub.add_parser("doctor", help="check local runtime dependencies")
     sub.add_parser("capabilities", help="print machine-readable integration capabilities")
 
@@ -50,6 +51,32 @@ def build_parser() -> argparse.ArgumentParser:
     video.add_argument("--height", type=int)
     video.add_argument("--resume-run")
     video.add_argument("--out", required=True)
+
+    edit_image = sub.add_parser("edit-image", help="edit an existing image from a prompt")
+    edit_image.add_argument("--input", required=True)
+    edit_image.add_argument("--prompt", required=True)
+    edit_image.add_argument("--negative-prompt", default="")
+    edit_image.add_argument("--model")
+    edit_image.add_argument("--strength", type=float, default=0.5)
+    edit_image.add_argument("--no-preserve-subject", action="store_false", dest="preserve_subject")
+    edit_image.add_argument("--out", required=True)
+
+    edit_video = sub.add_parser("edit-video", help="edit an existing video from a prompt")
+    edit_video.add_argument("--input", required=True)
+    edit_video.add_argument("--prompt", required=True)
+    edit_video.add_argument("--negative-prompt", default="")
+    edit_video.add_argument("--model")
+    edit_video.add_argument("--strength", type=float, default=0.45)
+    edit_video.add_argument("--no-preserve-subject", action="store_false", dest="preserve_subject")
+    edit_video.add_argument("--no-preserve-audio", action="store_false", dest="preserve_audio")
+    edit_video.add_argument("--out", required=True)
+
+    models = sub.add_parser("models", help="list or change edit models")
+    model_sub = models.add_subparsers(dest="model_command", required=True)
+    model_sub.add_parser("list", help="list available edit models")
+    model_sub.add_parser("default", help="show current default edit model")
+    model_set = model_sub.add_parser("set-default", help="persist a new default edit model")
+    model_set.add_argument("model")
 
     story = sub.add_parser("storybook", help="generate a context-grounded illustrated storybook")
     story.add_argument("--context", help="literal context text")
@@ -89,9 +116,11 @@ def doctor(settings: Settings) -> dict[str, object]:
     checks: dict[str, object] = {
         "python": sys.version.split()[0],
         "provider": settings.provider,
-        "ffmpeg": shutil.which(settings.ffmpeg),
+        "ffmpeg": shutil.which(settings.ffmpeg) or settings.ffmpeg,
         "home": str(settings.home),
         "modes": ["standalone", "helper", "bridge"],
+        "default_model": settings.default_model,
+        "edit_renderer": settings.edit_renderer,
     }
     try:
         import PIL  # noqa: F401
@@ -115,7 +144,10 @@ def doctor(settings: Settings) -> dict[str, object]:
         checks["qiskit_ibm_runtime"] = False
     checks["ready_for_native_image"] = bool(checks["pillow"])
     checks["ready_for_native_video"] = bool(checks["pillow"] and checks["ffmpeg"])
+    checks["ready_for_native_edit_image"] = bool(checks["pillow"])
+    checks["ready_for_native_edit_video"] = bool(checks["ffmpeg"])
     checks["ready_for_http_bridge"] = bool(checks["httpx"])
+    checks["http_edit_configured"] = bool(settings.edit_endpoint)
     return checks
 
 
@@ -142,22 +174,62 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     engine = CosmosMediaEngine(settings)
+    editing = EditingService(settings)
+
     if args.command == "bridge":
         if args.stdio:
-            return run_stdio(engine, sys.stdin, sys.stdout)
+            return run_stdio(engine, sys.stdin, sys.stdout, editing)
         raw = args.request if args.request is not None else sys.stdin.read()
         try:
             request = json.loads(raw)
             if not isinstance(request, dict):
                 raise ValueError("bridge request must be a JSON object")
-            _json(handle_request(engine, request))
+            _json(handle_request(engine, request, editing))
             return 0
         except Exception as exc:
             _json({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
             return 2
 
     if args.command == "status":
-        _json(engine.status())
+        status = engine.status()
+        status["editing"] = editing.models()
+        _json(status)
+    elif args.command == "models":
+        if args.model_command == "list":
+            _json(editing.models())
+        elif args.model_command == "default":
+            _json({"default_model": editing.registry.default_id, "model": editing.registry.get().to_dict()})
+        elif args.model_command == "set-default":
+            _json(editing.set_default_model(args.model))
+        else:
+            parser.error(f"unknown models command: {args.model_command}")
+    elif args.command == "edit-image":
+        asset = editing.import_file(args.input)
+        _json(
+            editing.edit_image(
+                asset["asset_id"],
+                args.prompt,
+                args.out,
+                model=args.model,
+                negative_prompt=args.negative_prompt,
+                strength=args.strength,
+                preserve_subject=args.preserve_subject,
+            )
+        )
+    elif args.command == "edit-video":
+        asset = editing.import_file(args.input)
+        _json(
+            editing.edit_video(
+                asset["asset_id"],
+                args.prompt,
+                args.out,
+                model=args.model,
+                negative_prompt=args.negative_prompt,
+                strength=args.strength,
+                preserve_subject=args.preserve_subject,
+                preserve_audio=args.preserve_audio,
+            )
+        )
     elif args.command == "reset-state":
         _json(engine.reset_state(args.context))
     elif args.command == "image":
