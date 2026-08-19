@@ -58,7 +58,10 @@ jobs:
           test -s out/ci-native-storybook/BOOK.md
           test -s out/ci-bridge.jsonl
           test -s out-model.json
-          cmp -s out/ci-native.png out/ci-edited.png && { echo "edited image unexpectedly identical"; exit 1; } || true
+          if cmp -s out/ci-native.png out/ci-edited.png; then
+            echo "edited image unexpectedly identical"
+            exit 1
+          fi
       - name: Doctor
         run: cosmos-media doctor
       - name: Upload native proof artifacts
