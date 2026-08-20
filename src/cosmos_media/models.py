@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -27,12 +28,16 @@ class ModelSpec:
         return payload
 
 
+def _detect_semantic_runtime() -> bool:
+    return bool(importlib.util.find_spec("torch") and importlib.util.find_spec("diffusers"))
+
+
 class ModelRegistry:
-    """Small persisted registry for COSMOS edit model selection.
+    """Persisted registry for COSMOS edit model selection.
 
     `cosmos-main` is a composite identity: QC67 is the controller/planner
-    identity while an edit renderer performs the actual pixel/video transform.
-    This distinction is surfaced in metadata so the system never claims the
+    identity while a visual renderer performs the actual pixel/video transform.
+    The distinction is surfaced in every status/result so COSMOS never claims a
     text-generation controller directly rendered media.
     """
 
@@ -42,11 +47,19 @@ class ModelRegistry:
         *,
         configured_default: str = COSMOS_MAIN_MODEL_ID,
         edit_renderer: str = "native",
+        image_edit_renderer: str | None = None,
+        video_edit_renderer: str | None = None,
         edit_endpoint: str = "",
+        semantic_available: bool | None = None,
+        semantic_image_model: str = "Qwen/Qwen-Image-Edit-2511",
     ) -> None:
         self.home = Path(home)
         self.edit_renderer = (edit_renderer or "native").strip().lower()
+        self.image_edit_renderer = (image_edit_renderer or self.edit_renderer).strip().lower()
+        self.video_edit_renderer = (video_edit_renderer or self.edit_renderer).strip().lower()
         self.edit_endpoint = edit_endpoint.strip()
+        self.semantic_image_model = semantic_image_model.strip()
+        self.semantic_available = _detect_semantic_runtime() if semantic_available is None else bool(semantic_available)
         self._state_path = self.home / "state" / "model.json"
         self._specs: dict[str, ModelSpec] = {
             COSMOS_MAIN_MODEL_ID: ModelSpec(
@@ -56,8 +69,8 @@ class ModelRegistry:
                 renderer="configured",
                 capabilities=("image_edit", "video_edit", "continuity", "planning"),
                 description=(
-                    "Default COSMOS composite model: QC67 controller identity with "
-                    "the configured visual edit renderer."
+                    "Default first-party COSMOS composite profile: QC67 controller/planning identity "
+                    "plus the configured visual renderer."
                 ),
             ),
             "native-edit": ModelSpec(
@@ -68,12 +81,30 @@ class ModelRegistry:
                 capabilities=("image_edit", "video_edit", "offline"),
                 description="Offline Pillow/FFmpeg prompt-conditioned media editor.",
             ),
+            "diffusers-edit": ModelSpec(
+                id="diffusers-edit",
+                label="COSMOS Local Semantic Edit",
+                controller_repo=None,
+                renderer="diffusers",
+                capabilities=(
+                    "image_edit",
+                    "video_edit",
+                    "semantic_edit",
+                    "framewise_video_edit",
+                    "mask_composite",
+                ),
+                description=(
+                    "Optional local semantic editor using a Diffusers image-edit pipeline; "
+                    f"configured model: {self.semantic_image_model or '<unset>'}."
+                ),
+                available=self.semantic_available and bool(self.semantic_image_model),
+            ),
             "http-edit": ModelSpec(
                 id="http-edit",
                 label="External HTTP Edit Model",
                 controller_repo=None,
                 renderer="http",
-                capabilities=("image_edit", "video_edit", "semantic_edit"),
+                capabilities=("image_edit", "video_edit", "semantic_edit", "mask_input"),
                 description="Bridge to a configured semantic image/video editing endpoint.",
                 available=bool(self.edit_endpoint),
             ),
@@ -106,14 +137,46 @@ class ModelRegistry:
             raise ValueError(f"unknown model: {chosen!r}")
         return replace(spec, default=chosen == self.default_id)
 
+    def _validate_renderer(self, renderer: str) -> str:
+        chosen = renderer.strip().lower()
+        if chosen not in {"native", "http", "diffusers"}:
+            raise ValueError(f"unsupported edit renderer: {chosen!r}")
+        if chosen == "http" and not self.edit_endpoint:
+            raise RuntimeError("HTTP editing requires COSMOS_EDIT_ENDPOINT")
+        if chosen == "diffusers" and not self.semantic_available:
+            raise RuntimeError(
+                "local semantic editing requires the optional semantic stack: "
+                "pip install -e '.[semantic]'"
+            )
+        if chosen == "diffusers" and not self.semantic_image_model:
+            raise RuntimeError("local semantic editing requires COSMOS_SEMANTIC_IMAGE_MODEL")
+        return chosen
+
+    def renderer_for(self, spec: ModelSpec, capability: str | None = None) -> str:
+        if spec.renderer == "configured":
+            if capability == "image_edit":
+                renderer = self.image_edit_renderer
+            elif capability == "video_edit":
+                renderer = self.video_edit_renderer
+            else:
+                renderer = self.edit_renderer
+            return renderer.strip().lower()
+        return spec.renderer
+
     def resolve(self, model_id: str | None, capability: str) -> ModelSpec:
         spec = self.get(model_id)
         if capability not in spec.capabilities:
             raise ValueError(f"model {spec.id!r} does not support {capability}")
-        if spec.renderer == "http" and not self.edit_endpoint:
-            raise RuntimeError(
-                "http-edit requires COSMOS_EDIT_ENDPOINT to point at a compatible edit service"
-            )
+        renderer = self.renderer_for(spec, capability)
+        self._validate_renderer(renderer)
+        if spec.id != COSMOS_MAIN_MODEL_ID and not spec.available:
+            if spec.renderer == "http":
+                raise RuntimeError("http-edit requires COSMOS_EDIT_ENDPOINT")
+            if spec.renderer == "diffusers":
+                raise RuntimeError(
+                    "diffusers-edit is unavailable; install with: pip install -e '.[semantic]'"
+                )
+            raise RuntimeError(f"model {spec.id!r} is unavailable")
         return spec
 
     def set_default(self, model_id: str) -> ModelSpec:
@@ -122,33 +185,46 @@ class ModelRegistry:
         self._write_persisted_default()
         return self.get(spec.id)
 
-    def renderer_for(self, spec: ModelSpec) -> str:
-        if spec.renderer == "configured":
-            renderer = self.edit_renderer or "native"
-            if renderer not in {"native", "http"}:
-                raise ValueError(f"unsupported COSMOS_EDIT_RENDERER: {renderer!r}")
-            if renderer == "http" and not self.edit_endpoint:
-                raise RuntimeError(
-                    "COSMOS Main is configured for the HTTP renderer but COSMOS_EDIT_ENDPOINT is empty"
-                )
-            return renderer
-        return spec.renderer
-
     def list(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for model_id in self._specs:
             spec = self.get(model_id)
             payload = spec.to_dict()
-            payload["active_renderer"] = self.renderer_for(spec) if spec.available or spec.id == COSMOS_MAIN_MODEL_ID else spec.renderer
+            if spec.id == COSMOS_MAIN_MODEL_ID:
+                image_renderer = self.renderer_for(spec, "image_edit")
+                video_renderer = self.renderer_for(spec, "video_edit")
+                payload["active_renderer"] = image_renderer if image_renderer == video_renderer else "mixed"
+                payload["active_renderers"] = {
+                    "image_edit": image_renderer,
+                    "video_edit": video_renderer,
+                }
+                payload["available"] = all(
+                    (
+                        renderer == "native"
+                        or (renderer == "http" and bool(self.edit_endpoint))
+                        or (renderer == "diffusers" and self.semantic_available and bool(self.semantic_image_model))
+                    )
+                    for renderer in (image_renderer, video_renderer)
+                )
+            else:
+                payload["active_renderer"] = spec.renderer
             result.append(payload)
         return result
 
     def status(self) -> dict[str, Any]:
         default = self.get()
+        image_renderer = self.renderer_for(default, "image_edit") if "image_edit" in default.capabilities else None
+        video_renderer = self.renderer_for(default, "video_edit") if "video_edit" in default.capabilities else None
         return {
             "default_model": self.default_id,
             "default_label": default.label,
             "controller_repo": default.controller_repo,
-            "renderer": self.renderer_for(default),
+            "renderer": image_renderer if image_renderer == video_renderer else "mixed",
+            "renderers": {
+                "image_edit": image_renderer,
+                "video_edit": video_renderer,
+            },
+            "semantic_runtime": self.semantic_available,
+            "semantic_image_model": self.semantic_image_model,
             "models": self.list(),
         }
