@@ -51,7 +51,7 @@ def test_bridge_forwards_masked_image_edit_controls():
     )
 
     assert response["ok"] is True
-    assert editing.image_call["mask"] == "mask.png"
+    assert editing.image_call["mask_asset_id"] == "asset-mask.png"
     assert editing.image_call["model"] == "cosmos-main"
     assert editing.image_call["strength"] == 0.7
 
