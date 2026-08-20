@@ -124,6 +124,7 @@ class ImageEditRequest(BaseModel):
     negative_prompt: str = ""
     strength: float = Field(default=0.5, ge=0.0, le=1.0)
     preserve_subject: bool = True
+    mask_asset_id: str | None = None
 
 
 class VideoEditRequest(BaseModel):
@@ -135,6 +136,9 @@ class VideoEditRequest(BaseModel):
     strength: float = Field(default=0.45, ge=0.0, le=1.0)
     preserve_subject: bool = True
     preserve_audio: bool = True
+    chunk_seconds: float = Field(default=6.0, gt=0)
+    style_lock: bool = True
+    temporal_blend: float = Field(default=0.12, ge=0.0, le=1.0)
 
 
 def _run(fn, *args, **kwargs):
@@ -231,6 +235,7 @@ def edit_image(request: ImageEditRequest) -> dict[str, Any]:
         negative_prompt=request.negative_prompt,
         strength=request.strength,
         preserve_subject=request.preserve_subject,
+        mask_asset_id=request.mask_asset_id,
     )
 
 
@@ -246,6 +251,9 @@ def edit_video(request: VideoEditRequest) -> dict[str, Any]:
         strength=request.strength,
         preserve_subject=request.preserve_subject,
         preserve_audio=request.preserve_audio,
+        chunk_seconds=request.chunk_seconds,
+        style_lock=request.style_lock,
+        temporal_blend=request.temporal_blend,
     )
 
 
