@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import uuid
 from typing import Any
 
@@ -38,6 +39,20 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temp.replace(path)
 
 
+def _parse_rate(value: str | None) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        if "/" in text:
+            numerator, denominator = text.split("/", 1)
+            denominator_v = float(denominator)
+            return float(numerator) / denominator_v if denominator_v else None
+        return float(text)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 class EditingService:
     """Upload + prompt-edit service shared by CLI, API, UI and JSONL bridge."""
 
@@ -48,7 +63,10 @@ class EditingService:
             self.settings.home,
             configured_default=self.settings.default_model,
             edit_renderer=self.settings.edit_renderer,
+            image_edit_renderer=self.settings.image_edit_renderer,
+            video_edit_renderer=self.settings.video_edit_renderer,
             edit_endpoint=self.settings.edit_endpoint,
+            semantic_image_model=self.settings.semantic_image_model,
         )
         self._synaptic_path = self.settings.home / "state" / "editing-synaptic.json"
         self.synaptic = self._load_synaptic()
@@ -93,11 +111,83 @@ class EditingService:
                 f"upload is {size / (1024 * 1024):.1f} MB; maximum is {self.settings.max_upload_mb} MB"
             )
 
+    def _inspect_image(self, path: Path) -> dict[str, Any]:
+        try:
+            from PIL import Image, UnidentifiedImageError
+        except ImportError as exc:
+            raise RuntimeError("Pillow is required to validate image uploads") from exc
+        try:
+            with Image.open(path) as opened:
+                opened.verify()
+            with Image.open(path) as opened:
+                return {
+                    "width": int(opened.width),
+                    "height": int(opened.height),
+                    "format": str(opened.format or path.suffix.lstrip(".")).upper(),
+                    "mode": str(opened.mode),
+                }
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise ValueError(f"invalid image upload: {path.name}") from exc
+
+    def _inspect_video(self, path: Path) -> dict[str, Any]:
+        ffprobe = shutil.which("ffprobe")
+        if not ffprobe:
+            return {}
+        command = [
+            ffprobe,
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,avg_frame_rate,codec_name:format=duration,format_name",
+            "-of",
+            "json",
+            str(path),
+        ]
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            payload = json.loads(result.stdout or "{}")
+        except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as exc:
+            raise ValueError(f"invalid video upload: {path.name}") from exc
+        streams = payload.get("streams") or []
+        if not streams:
+            raise ValueError(f"invalid video upload: {path.name}")
+        stream = streams[0]
+        format_data = payload.get("format") or {}
+        metadata: dict[str, Any] = {
+            "width": int(stream.get("width") or 0),
+            "height": int(stream.get("height") or 0),
+            "codec": str(stream.get("codec_name") or ""),
+            "format": str(format_data.get("format_name") or path.suffix.lstrip(".")),
+        }
+        fps = _parse_rate(stream.get("avg_frame_rate"))
+        if fps is not None:
+            metadata["fps"] = fps
+        try:
+            duration = float(format_data.get("duration") or 0.0)
+            if duration > 0:
+                metadata["duration"] = duration
+        except (TypeError, ValueError):
+            pass
+        return metadata
+
+    def _inspect_media(self, path: Path, kind: str) -> dict[str, Any]:
+        return self._inspect_image(path) if kind == "image" else self._inspect_video(path)
+
     def _asset_meta_path(self, asset_id: str) -> Path:
         return self._assets_dir / f"{asset_id}.json"
 
-    def _record_asset(self, *, asset_id: str, kind: str, original_name: str, path: Path) -> dict[str, Any]:
-        payload = {
+    def _record_asset(
+        self,
+        *,
+        asset_id: str,
+        kind: str,
+        original_name: str,
+        path: Path,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "asset_id": asset_id,
             "kind": kind,
             "original_name": original_name,
@@ -106,6 +196,7 @@ class EditingService:
             "sha256": _sha256_file(path),
             "created_at": _utc_now(),
         }
+        payload.update(metadata or {})
         _write_json(self._asset_meta_path(asset_id), payload)
         return payload
 
@@ -116,6 +207,7 @@ class EditingService:
         suffix = path.suffix.lower()
         kind = self._classify_suffix(suffix)
         self._validate_size(path.stat().st_size)
+        metadata = self._inspect_media(path, kind)
         asset_id = uuid.uuid4().hex
         destination = self._assets_dir / f"{asset_id}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +217,7 @@ class EditingService:
             kind=kind,
             original_name=path.name,
             path=destination,
+            metadata=metadata,
         )
 
     def store_upload(self, filename: str, data: bytes) -> dict[str, Any]:
@@ -135,11 +228,17 @@ class EditingService:
         destination = self._assets_dir / f"{asset_id}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
+        try:
+            metadata = self._inspect_media(destination, kind)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
         return self._record_asset(
             asset_id=asset_id,
             kind=kind,
             original_name=Path(filename).name or f"upload{suffix}",
             path=destination,
+            metadata=metadata,
         )
 
     def asset(self, asset_id: str) -> dict[str, Any]:
@@ -174,10 +273,21 @@ class EditingService:
 
     def set_default_model(self, model_id: str) -> dict[str, Any]:
         selected = self.registry.set_default(model_id)
+        image_renderer = (
+            self.registry.renderer_for(selected, "image_edit")
+            if "image_edit" in selected.capabilities
+            else None
+        )
+        video_renderer = (
+            self.registry.renderer_for(selected, "video_edit")
+            if "video_edit" in selected.capabilities
+            else None
+        )
         return {
             "default_model": selected.id,
             "model": selected.to_dict(),
-            "renderer": self.registry.renderer_for(selected),
+            "renderer": image_renderer if image_renderer == video_renderer else "mixed",
+            "renderers": {"image_edit": image_renderer, "video_edit": video_renderer},
         }
 
     def _begin_job(
@@ -200,7 +310,7 @@ class EditingService:
 
         capability = f"{kind}_edit"
         spec = self.registry.resolve(model_id, capability)
-        renderer = self.registry.renderer_for(spec)
+        renderer = self.registry.renderer_for(spec, capability)
         job_id = f"edit-{kind}-{uuid.uuid4().hex[:16]}"
         if output is None:
             suffix = ".png" if kind == "image" else ".mp4"
@@ -233,6 +343,24 @@ class EditingService:
         )
         self._save_synaptic()
         return snapshot
+
+    def _apply_mask(self, source: Path, edited: Path, mask: Path) -> Path:
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError("Pillow is required for masked image editing") from exc
+        with Image.open(source) as source_opened:
+            source_has_alpha = "A" in source_opened.getbands()
+            source_image = source_opened.convert("RGBA" if source_has_alpha else "RGB")
+        with Image.open(edited) as edited_opened:
+            edited_image = edited_opened.convert(source_image.mode).resize(source_image.size)
+        with Image.open(mask) as mask_opened:
+            mask_image = mask_opened.convert("L").resize(source_image.size)
+        result = Image.composite(edited_image, source_image, mask_image)
+        if edited.suffix.lower() in {".jpg", ".jpeg"}:
+            result = result.convert("RGB")
+        result.save(edited)
+        return edited
 
     def _receipt(
         self,
@@ -275,8 +403,12 @@ class EditingService:
         negative_prompt: str = "",
         strength: float = 0.5,
         preserve_subject: bool = True,
+        mask_asset_id: str | None = None,
     ) -> dict[str, Any]:
         asset = self.asset(asset_id)
+        mask_asset = self.asset(mask_asset_id) if mask_asset_id else None
+        if mask_asset and mask_asset["kind"] != "image":
+            raise ValueError("image edit mask must be an image asset")
         job, spec, renderer, destination = self._begin_job(
             kind="image",
             asset=asset,
@@ -286,10 +418,20 @@ class EditingService:
             output=output,
         )
         job["status"] = "processing"
+        if mask_asset:
+            job["mask_asset_id"] = mask_asset["asset_id"]
         self._write_job(job)
+        parameters = {
+            "strength": float(strength),
+            "preserve_subject": bool(preserve_subject),
+            "negative_prompt_hash": sha256_text(negative_prompt),
+            "mask_asset_id": mask_asset["asset_id"] if mask_asset else None,
+            "mask_sha256": mask_asset["sha256"] if mask_asset else None,
+        }
         try:
             state = self._pulse("image", asset, prompt, spec.id)
             provider = make_edit_provider(self.settings, renderer)
+            mask_path = Path(mask_asset["path"]) if mask_asset else None
             rendered = provider.edit_image(
                 EditImageJob(
                     source=Path(asset["path"]),
@@ -299,19 +441,18 @@ class EditingService:
                     strength=float(strength),
                     preserve_subject=bool(preserve_subject),
                     state=list(state["values"]),
+                    mask=mask_path,
                 )
             )
+            if mask_path:
+                rendered = self._apply_mask(Path(asset["path"]), rendered, mask_path)
             receipt = self._receipt(
                 job=job,
                 asset=asset,
                 prompt=prompt,
                 state=state,
                 output=rendered,
-                parameters={
-                    "strength": float(strength),
-                    "preserve_subject": bool(preserve_subject),
-                    "negative_prompt_hash": sha256_text(negative_prompt),
-                },
+                parameters=parameters,
             )
             job.update({"status": "completed", "output": str(rendered), "receipt": str(receipt)})
             self._write_job(job)
@@ -322,6 +463,8 @@ class EditingService:
                 "model": spec.id,
                 "controller_repo": spec.controller_repo,
                 "renderer": renderer,
+                "mask_asset_id": mask_asset["asset_id"] if mask_asset else None,
+                "parameters": parameters,
                 "state": {"step_index": state["step_index"], "state_hash": state["state_hash"]},
             }
         except Exception as exc:
@@ -340,7 +483,14 @@ class EditingService:
         strength: float = 0.45,
         preserve_subject: bool = True,
         preserve_audio: bool = True,
+        chunk_seconds: float = 6.0,
+        style_lock: bool = True,
+        temporal_blend: float = 0.12,
     ) -> dict[str, Any]:
+        if float(chunk_seconds) <= 0:
+            raise ValueError("chunk_seconds must be positive")
+        if not 0.0 <= float(temporal_blend) <= 1.0:
+            raise ValueError("temporal_blend must be between 0 and 1")
         asset = self.asset(asset_id)
         job, spec, renderer, destination = self._begin_job(
             kind="video",
@@ -352,6 +502,15 @@ class EditingService:
         )
         job["status"] = "processing"
         self._write_job(job)
+        parameters = {
+            "strength": float(strength),
+            "preserve_subject": bool(preserve_subject),
+            "preserve_audio": bool(preserve_audio),
+            "chunk_seconds": float(chunk_seconds),
+            "style_lock": bool(style_lock),
+            "temporal_blend": float(temporal_blend),
+            "negative_prompt_hash": sha256_text(negative_prompt),
+        }
         try:
             state = self._pulse("video", asset, prompt, spec.id)
             provider = make_edit_provider(self.settings, renderer)
@@ -365,6 +524,9 @@ class EditingService:
                     preserve_subject=bool(preserve_subject),
                     preserve_audio=bool(preserve_audio),
                     state=list(state["values"]),
+                    chunk_seconds=float(chunk_seconds),
+                    style_lock=bool(style_lock),
+                    temporal_blend=float(temporal_blend),
                 )
             )
             receipt = self._receipt(
@@ -373,12 +535,7 @@ class EditingService:
                 prompt=prompt,
                 state=state,
                 output=rendered,
-                parameters={
-                    "strength": float(strength),
-                    "preserve_subject": bool(preserve_subject),
-                    "preserve_audio": bool(preserve_audio),
-                    "negative_prompt_hash": sha256_text(negative_prompt),
-                },
+                parameters=parameters,
             )
             job.update({"status": "completed", "output": str(rendered), "receipt": str(receipt)})
             self._write_job(job)
@@ -389,6 +546,7 @@ class EditingService:
                 "model": spec.id,
                 "controller_repo": spec.controller_repo,
                 "renderer": renderer,
+                "parameters": parameters,
                 "state": {"step_index": state["step_index"], "state_hash": state["state_hash"]},
             }
         except Exception as exc:

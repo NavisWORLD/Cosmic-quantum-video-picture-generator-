@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 
-from PIL import Image
+from PIL import Image, ImageOps
+import pytest
 
 from cosmos_media.config import Settings
-from cosmos_media.edit_providers import prompt_video_filter
+from cosmos_media.edit_providers import DiffusersEditProvider, EditVideoJob, prompt_video_filter
 from cosmos_media.editing import EditingService
 
 
@@ -32,6 +34,8 @@ def test_upload_and_native_image_edit(tmp_path):
     asset = service.import_file(source)
     assert asset["kind"] == "image"
     assert asset["asset_id"]
+    assert asset["width"] == 64
+    assert asset["height"] == 48
 
     output = tmp_path / "edited.png"
     result = service.edit_image(
@@ -47,6 +51,45 @@ def test_upload_and_native_image_edit(tmp_path):
     assert result["renderer"] == "native"
     assert Path(result["receipt"]).exists()
     assert service.job(result["job_id"])["status"] == "completed"
+
+
+def test_masked_native_image_edit_preserves_unmasked_pixels(tmp_path):
+    source = tmp_path / "source.png"
+    mask = tmp_path / "mask.png"
+    Image.new("RGB", (8, 4), (60, 90, 120)).save(source)
+    mask_image = Image.new("L", (8, 4), 0)
+    for x in range(4):
+        for y in range(4):
+            mask_image.putpixel((x, y), 255)
+    mask_image.save(mask)
+
+    service = EditingService(make_settings(tmp_path))
+    source_asset = service.import_file(source)
+    mask_asset = service.import_file(mask)
+    output = tmp_path / "masked.png"
+
+    result = service.edit_image(
+        source_asset["asset_id"],
+        "warm neon cinematic",
+        output,
+        model="native-edit",
+        strength=1.0,
+        mask_asset_id=mask_asset["asset_id"],
+    )
+
+    with Image.open(source) as original, Image.open(output) as edited:
+        original = original.convert("RGB")
+        edited = edited.convert("RGB")
+        for x in range(4, 8):
+            for y in range(4):
+                assert edited.getpixel((x, y)) == original.getpixel((x, y))
+        assert any(
+            edited.getpixel((x, y)) != original.getpixel((x, y))
+            for x in range(4)
+            for y in range(4)
+        )
+
+    assert result["mask_asset_id"] == mask_asset["asset_id"]
 
 
 def test_cosmos_main_uses_qc67_identity_but_reports_actual_renderer(tmp_path):
@@ -78,9 +121,99 @@ def test_rejects_unsupported_upload(tmp_path):
     bad = tmp_path / "payload.exe"
     bad.write_bytes(b"not media")
     service = EditingService(make_settings(tmp_path))
-    try:
+    with pytest.raises(ValueError, match="unsupported"):
         service.import_file(bad)
-    except ValueError as exc:
-        assert "unsupported" in str(exc).lower()
-    else:
-        raise AssertionError("unsupported upload should fail")
+
+
+def test_rejects_invalid_image_bytes_with_valid_extension(tmp_path):
+    bad = tmp_path / "fake.png"
+    bad.write_bytes(b"this is not actually a png")
+    service = EditingService(make_settings(tmp_path))
+    with pytest.raises(ValueError, match="invalid image"):
+        service.import_file(bad)
+
+
+def _make_test_video(path: Path, *, duration: float = 0.5) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg not available")
+    import subprocess
+
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=navy:s=96x64:d={duration}:r=12",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_native_video_edit_smoke_and_chunk_parameters(tmp_path):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "edited.mp4"
+    _make_test_video(source)
+
+    service = EditingService(make_settings(tmp_path))
+    asset = service.import_file(source)
+    result = service.edit_video(
+        asset["asset_id"],
+        "warm cinematic",
+        output,
+        model="native-edit",
+        chunk_seconds=0.25,
+        style_lock=True,
+        temporal_blend=0.1,
+        preserve_audio=False,
+    )
+    assert output.exists() and output.stat().st_size > 0
+    assert result["parameters"]["chunk_seconds"] == 0.25
+    assert result["parameters"]["style_lock"] is True
+    assert result["parameters"]["temporal_blend"] == 0.1
+
+
+def test_semantic_video_orchestration_works_with_injected_frame_editor(tmp_path, monkeypatch):
+    if not shutil.which("ffprobe"):
+        pytest.skip("ffprobe not available")
+    source = tmp_path / "semantic-source.mp4"
+    output = tmp_path / "semantic-edited.mp4"
+    _make_test_video(source, duration=0.6)
+    provider = DiffusersEditProvider(make_settings(tmp_path))
+    calls: list[tuple[str, int | None]] = []
+
+    def fake_edit_image(job):
+        calls.append((job.prompt, job.seed))
+        with Image.open(job.source) as opened:
+            edited = ImageOps.invert(opened.convert("RGB"))
+            edited.save(job.output)
+        return job.output
+
+    monkeypatch.setattr(provider, "edit_image", fake_edit_image)
+    provider.edit_video(
+        EditVideoJob(
+            source=source,
+            output=output,
+            prompt="make every frame luminous",
+            strength=0.7,
+            preserve_audio=False,
+            chunk_seconds=0.2,
+            style_lock=True,
+            temporal_blend=0.1,
+            state=[0.0] * 12,
+        )
+    )
+
+    assert output.exists() and output.stat().st_size > 0
+    assert len(calls) >= 2
+    assert len({seed for _, seed in calls}) == 1
+    assert all(prompt == "make every frame luminous" for prompt, _ in calls)

@@ -54,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     edit_image = sub.add_parser("edit-image", help="edit an existing image from a prompt")
     edit_image.add_argument("--input", required=True)
+    edit_image.add_argument("--mask", help="optional image mask; white pixels are editable")
     edit_image.add_argument("--prompt", required=True)
     edit_image.add_argument("--negative-prompt", default="")
     edit_image.add_argument("--model")
@@ -69,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
     edit_video.add_argument("--strength", type=float, default=0.45)
     edit_video.add_argument("--no-preserve-subject", action="store_false", dest="preserve_subject")
     edit_video.add_argument("--no-preserve-audio", action="store_false", dest="preserve_audio")
+    edit_video.add_argument("--chunk-seconds", type=float, default=6.0)
+    edit_video.add_argument("--no-style-lock", action="store_false", dest="style_lock")
+    edit_video.add_argument("--temporal-blend", type=float, default=0.12)
     edit_video.add_argument("--out", required=True)
 
     models = sub.add_parser("models", help="list or change edit models")
@@ -117,10 +121,14 @@ def doctor(settings: Settings) -> dict[str, object]:
         "python": sys.version.split()[0],
         "provider": settings.provider,
         "ffmpeg": shutil.which(settings.ffmpeg) or settings.ffmpeg,
+        "ffprobe": shutil.which("ffprobe"),
         "home": str(settings.home),
         "modes": ["standalone", "helper", "bridge"],
         "default_model": settings.default_model,
         "edit_renderer": settings.edit_renderer,
+        "image_edit_renderer": settings.image_edit_renderer,
+        "video_edit_renderer": settings.video_edit_renderer,
+        "semantic_image_model": settings.semantic_image_model,
     }
     try:
         import PIL  # noqa: F401
@@ -142,12 +150,19 @@ def doctor(settings: Settings) -> dict[str, object]:
         checks["qiskit_ibm_runtime"] = True
     except ImportError:
         checks["qiskit_ibm_runtime"] = False
+    try:
+        import torch  # noqa: F401
+        import diffusers  # noqa: F401
+        checks["semantic_runtime"] = True
+    except ImportError:
+        checks["semantic_runtime"] = False
     checks["ready_for_native_image"] = bool(checks["pillow"])
     checks["ready_for_native_video"] = bool(checks["pillow"] and checks["ffmpeg"])
     checks["ready_for_native_edit_image"] = bool(checks["pillow"])
     checks["ready_for_native_edit_video"] = bool(checks["ffmpeg"])
     checks["ready_for_http_bridge"] = bool(checks["httpx"])
     checks["http_edit_configured"] = bool(settings.edit_endpoint)
+    checks["ready_for_local_semantic_edit"] = bool(checks["pillow"] and checks["semantic_runtime"])
     return checks
 
 
@@ -205,6 +220,9 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"unknown models command: {args.model_command}")
     elif args.command == "edit-image":
         asset = editing.import_file(args.input)
+        mask_asset_id = None
+        if args.mask:
+            mask_asset_id = editing.import_file(args.mask)["asset_id"]
         _json(
             editing.edit_image(
                 asset["asset_id"],
@@ -214,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
                 negative_prompt=args.negative_prompt,
                 strength=args.strength,
                 preserve_subject=args.preserve_subject,
+                mask_asset_id=mask_asset_id,
             )
         )
     elif args.command == "edit-video":
@@ -228,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
                 strength=args.strength,
                 preserve_subject=args.preserve_subject,
                 preserve_audio=args.preserve_audio,
+                chunk_seconds=args.chunk_seconds,
+                style_lock=args.style_lock,
+                temporal_blend=args.temporal_blend,
             )
         )
     elif args.command == "reset-state":
