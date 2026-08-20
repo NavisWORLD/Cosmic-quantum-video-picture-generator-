@@ -32,6 +32,23 @@ CAPABILITIES = {
         "edit_image",
         "edit_video",
     ],
+    "editing": {
+        "uploads": ["png", "jpg", "jpeg", "webp", "mp4", "mov", "webm", "m4v"],
+        "image": ["prompt", "negative_prompt", "model", "strength", "preserve_subject", "mask"],
+        "video": [
+            "prompt",
+            "negative_prompt",
+            "model",
+            "strength",
+            "preserve_subject",
+            "preserve_audio",
+            "chunk_seconds",
+            "style_lock",
+            "temporal_blend",
+        ],
+        "renderers": ["native", "diffusers", "http"],
+        "default_model": "cosmos-main",
+    },
 }
 
 
@@ -70,6 +87,10 @@ def handle_request(
             raise ValueError("edit_image requires input and prompt")
         service = _editing_for(engine, editing)
         asset = service.import_file(source)
+        mask_asset_id = None
+        mask_source = str(request.get("mask", "")).strip()
+        if mask_source:
+            mask_asset_id = service.import_file(mask_source)["asset_id"]
         return ok(
             service.edit_image(
                 asset["asset_id"],
@@ -79,6 +100,7 @@ def handle_request(
                 negative_prompt=str(request.get("negative_prompt", "")),
                 strength=float(request.get("strength", 0.5)),
                 preserve_subject=bool(request.get("preserve_subject", True)),
+                mask_asset_id=mask_asset_id,
             )
         )
     if op == "edit_video":
@@ -98,6 +120,9 @@ def handle_request(
                 strength=float(request.get("strength", 0.45)),
                 preserve_subject=bool(request.get("preserve_subject", True)),
                 preserve_audio=bool(request.get("preserve_audio", True)),
+                chunk_seconds=float(request.get("chunk_seconds", 6.0)),
+                style_lock=bool(request.get("style_lock", True)),
+                temporal_blend=float(request.get("temporal_blend", 0.12)),
             )
         )
     if op == "state":
