@@ -14,6 +14,9 @@ const contextFields = $('contextFields');
 const editFields = $('editFields');
 const mediaFile = $('mediaFile');
 const sourcePreview = $('sourcePreview');
+const maskFields = $('maskFields');
+const maskFile = $('maskFile');
+const maskPreview = $('maskPreview');
 const modelSelect = $('modelSelect');
 const modelNote = $('modelNote');
 const strength = $('strength');
@@ -22,6 +25,11 @@ const negativePrompt = $('negativePrompt');
 const preserveSubject = $('preserveSubject');
 const preserveAudio = $('preserveAudio');
 const audioCheck = $('audioCheck');
+const editVideoFields = $('editVideoFields');
+const editChunkSeconds = $('editChunkSeconds');
+const styleLock = $('styleLock');
+const temporalBlend = $('temporalBlend');
+const temporalBlendValue = $('temporalBlendValue');
 const actionHelp = $('actionHelp');
 const engineUrl = $('engineUrl');
 const saveEngine = $('saveEngine');
@@ -31,6 +39,7 @@ const shareOutput = $('shareOutput');
 
 let lastOutputUrl = null;
 let sourceObjectUrl = null;
+let maskObjectUrl = null;
 let modelPayload = null;
 
 function isHttpOrigin() {
@@ -59,28 +68,35 @@ function isEditMode() {
 
 function setModeFields() {
   const editing = isEditMode();
+  const editImage = mode.value === 'edit-image';
   const editVideo = mode.value === 'edit-video';
   editFields.hidden = !editing;
+  maskFields.hidden = !editImage;
+  editVideoFields.hidden = !editVideo;
   contextFields.style.display = editing ? 'none' : 'block';
   videoFields.style.display = mode.value === 'video' ? 'block' : 'none';
   storyFields.style.display = mode.value === 'storybook' ? 'block' : 'none';
   audioCheck.style.display = editVideo ? 'flex' : 'none';
-  mediaFile.accept = mode.value === 'edit-image'
+  mediaFile.accept = editImage
     ? 'image/png,image/jpeg,image/webp'
-    : mode.value === 'edit-video'
+    : editVideo
       ? 'video/mp4,video/quicktime,video/webm,.m4v'
       : 'image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,.m4v';
   go.textContent = editing ? 'EDIT // REWRITE THIS MEDIA' : 'GENERATE // CONTINUE THE TIMELINE';
   actionHelp.innerHTML = editing
-    ? 'COSMOS stores the upload under an opaque asset ID, advances Synaptic continuity, and records the chosen model plus the renderer that actually changed the media.'
+    ? 'COSMOS stores uploads under opaque asset IDs, advances Synaptic continuity, and records the selected model, controller and renderer that actually changed the media.'
     : 'For one hour enter <strong>3600</strong>. COSMOS renders bounded chunks, checkpoints the creative state, and stitches the timeline.';
   if (editing) refreshModels();
+  updateModelNote();
 }
 mode.addEventListener('change', setModeFields);
 setModeFields();
 
 strength.addEventListener('input', () => {
   strengthValue.textContent = Number(strength.value).toFixed(2);
+});
+temporalBlend.addEventListener('input', () => {
+  temporalBlendValue.textContent = Number(temporalBlend.value).toFixed(2);
 });
 
 async function jsonFetch(path, options = {}) {
@@ -119,8 +135,10 @@ function updateModelNote() {
   if (!modelPayload) return;
   const selected = (modelPayload.models || []).find((item) => item.id === modelSelect.value);
   if (!selected) return;
+  const capability = mode.value === 'edit-video' ? 'video_edit' : 'image_edit';
+  const renderer = selected.active_renderers?.[capability] || selected.active_renderer || selected.renderer;
   const controller = selected.controller_repo ? ` · controller ${selected.controller_repo}` : '';
-  modelNote.textContent = `${selected.label} · renderer ${selected.active_renderer}${controller}. ${selected.description || ''}`;
+  modelNote.textContent = `${selected.label} · renderer ${renderer}${controller}. ${selected.description || ''}`;
 }
 modelSelect.addEventListener('change', updateModelNote);
 
@@ -169,11 +187,13 @@ async function refreshStatus() {
   try {
     const data = await jsonFetch('/v1/status');
     const edit = data.editing || {};
+    const renderers = edit.renderers || {};
     status.innerHTML = [
       `<span class="pill ok">engine online</span>`,
       `<span class="pill">provider ${data.provider}</span>`,
       `<span class="pill">model ${edit.default_model || 'cosmos-main'}</span>`,
-      `<span class="pill">edit ${edit.renderer || 'native'}</span>`,
+      `<span class="pill">image edit ${renderers.image_edit || edit.renderer || 'native'}</span>`,
+      `<span class="pill">video edit ${renderers.video_edit || edit.renderer || 'native'}</span>`,
       `<span class="pill">quantum ${data.quantum.mode}</span>`,
       `<span class="pill">state step ${data.state.step_index}</span>`,
     ].join('');
@@ -186,25 +206,31 @@ async function refreshStatus() {
   }
 }
 
-function renderSourcePreview(file) {
-  if (sourceObjectUrl) URL.revokeObjectURL(sourceObjectUrl);
-  sourceObjectUrl = null;
-  sourcePreview.innerHTML = '';
-  if (!file) return;
-  sourceObjectUrl = URL.createObjectURL(file);
-  if (file.type.startsWith('image/')) {
-    sourcePreview.innerHTML = `<img alt="Uploaded source image" src="${sourceObjectUrl}" />`;
+function renderFilePreview(file, target, kind) {
+  target.innerHTML = '';
+  if (!file) return null;
+  const objectUrl = URL.createObjectURL(file);
+  if (kind === 'image' || file.type.startsWith('image/')) {
+    target.innerHTML = `<img alt="Uploaded preview" src="${objectUrl}" />`;
   } else if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
-    sourcePreview.innerHTML = `<video controls playsinline src="${sourceObjectUrl}"></video>`;
+    target.innerHTML = `<video controls playsinline src="${objectUrl}"></video>`;
   } else {
-    sourcePreview.textContent = file.name;
+    target.textContent = file.name;
   }
+  return objectUrl;
 }
-mediaFile.addEventListener('change', () => renderSourcePreview(mediaFile.files?.[0]));
 
-async function uploadSelectedMedia() {
-  const file = mediaFile.files?.[0];
-  if (!file) throw new Error('Choose an image or video to edit first.');
+mediaFile.addEventListener('change', () => {
+  if (sourceObjectUrl) URL.revokeObjectURL(sourceObjectUrl);
+  sourceObjectUrl = renderFilePreview(mediaFile.files?.[0], sourcePreview, mode.value === 'edit-image' ? 'image' : 'video');
+});
+maskFile.addEventListener('change', () => {
+  if (maskObjectUrl) URL.revokeObjectURL(maskObjectUrl);
+  maskObjectUrl = renderFilePreview(maskFile.files?.[0], maskPreview, 'image');
+});
+
+async function uploadFile(file) {
+  if (!file) throw new Error('Choose a file first.');
   const form = new FormData();
   form.append('file', file, file.name);
   return jsonFetch('/v1/uploads', { method: 'POST', body: form });
@@ -213,9 +239,10 @@ async function uploadSelectedMedia() {
 async function runEdit() {
   const text = prompt.value.trim();
   if (!text) throw new Error('Add an edit prompt first.');
+  const file = mediaFile.files?.[0];
+  if (!file) throw new Error('Choose an image or video to edit first.');
   result.textContent = 'Uploading source media…';
-  const asset = await uploadSelectedMedia();
-  result.textContent = `Uploaded ${asset.original_name}. Editing…`;
+  const asset = await uploadFile(file);
   const kind = mode.value === 'edit-image' ? 'image' : 'video';
   const payload = {
     asset_id: asset.asset_id,
@@ -225,7 +252,18 @@ async function runEdit() {
     strength: Number(strength.value),
     preserve_subject: preserveSubject.checked,
   };
-  if (kind === 'video') payload.preserve_audio = preserveAudio.checked;
+  if (kind === 'image' && maskFile.files?.[0]) {
+    result.textContent = 'Uploading source + edit mask…';
+    const maskAsset = await uploadFile(maskFile.files[0]);
+    payload.mask_asset_id = maskAsset.asset_id;
+  }
+  if (kind === 'video') {
+    payload.preserve_audio = preserveAudio.checked;
+    payload.chunk_seconds = Number(editChunkSeconds.value);
+    payload.style_lock = styleLock.checked;
+    payload.temporal_blend = Number(temporalBlend.value);
+  }
+  result.textContent = `Uploaded ${asset.original_name}. Editing with ${payload.model}…`;
   return jsonFetch(`/v1/edit/${kind}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
