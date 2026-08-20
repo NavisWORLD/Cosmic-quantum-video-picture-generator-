@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 
-from PIL import Image
+from PIL import Image, ImageOps
 import pytest
 
 from cosmos_media.config import Settings
-from cosmos_media.edit_providers import prompt_video_filter
+from cosmos_media.edit_providers import DiffusersEditProvider, EditVideoJob, prompt_video_filter
 from cosmos_media.editing import EditingService
 
 
@@ -133,14 +133,10 @@ def test_rejects_invalid_image_bytes_with_valid_extension(tmp_path):
         service.import_file(bad)
 
 
-def test_native_video_edit_smoke_and_chunk_parameters(tmp_path):
+def _make_test_video(path: Path, *, duration: float = 0.5) -> None:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         pytest.skip("ffmpeg not available")
-
-    settings = make_settings(tmp_path)
-    source = tmp_path / "source.mp4"
-    output = tmp_path / "edited.mp4"
     import subprocess
 
     subprocess.run(
@@ -150,19 +146,25 @@ def test_native_video_edit_smoke_and_chunk_parameters(tmp_path):
             "-f",
             "lavfi",
             "-i",
-            "color=c=navy:s=96x64:d=0.5:r=12",
+            f"color=c=navy:s=96x64:d={duration}:r=12",
             "-an",
             "-c:v",
             "libx264",
             "-pix_fmt",
             "yuv420p",
-            str(source),
+            str(path),
         ],
         check=True,
         capture_output=True,
     )
 
-    service = EditingService(settings)
+
+def test_native_video_edit_smoke_and_chunk_parameters(tmp_path):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "edited.mp4"
+    _make_test_video(source)
+
+    service = EditingService(make_settings(tmp_path))
     asset = service.import_file(source)
     result = service.edit_video(
         asset["asset_id"],
@@ -178,3 +180,40 @@ def test_native_video_edit_smoke_and_chunk_parameters(tmp_path):
     assert result["parameters"]["chunk_seconds"] == 0.25
     assert result["parameters"]["style_lock"] is True
     assert result["parameters"]["temporal_blend"] == 0.1
+
+
+def test_semantic_video_orchestration_works_with_injected_frame_editor(tmp_path, monkeypatch):
+    if not shutil.which("ffprobe"):
+        pytest.skip("ffprobe not available")
+    source = tmp_path / "semantic-source.mp4"
+    output = tmp_path / "semantic-edited.mp4"
+    _make_test_video(source, duration=0.6)
+    provider = DiffusersEditProvider(make_settings(tmp_path))
+    calls: list[tuple[str, int | None]] = []
+
+    def fake_edit_image(job):
+        calls.append((job.prompt, job.seed))
+        with Image.open(job.source) as opened:
+            edited = ImageOps.invert(opened.convert("RGB"))
+            edited.save(job.output)
+        return job.output
+
+    monkeypatch.setattr(provider, "edit_image", fake_edit_image)
+    provider.edit_video(
+        EditVideoJob(
+            source=source,
+            output=output,
+            prompt="make every frame luminous",
+            strength=0.7,
+            preserve_audio=False,
+            chunk_seconds=0.2,
+            style_lock=True,
+            temporal_blend=0.1,
+            state=[0.0] * 12,
+        )
+    )
+
+    assert output.exists() and output.stat().st_size > 0
+    assert len(calls) >= 2
+    assert len({seed for _, seed in calls}) == 1
+    assert all(prompt == "make every frame luminous" for prompt, _ in calls)
