@@ -24,7 +24,7 @@ jobs:
       - name: Compile Python edit stack
         run: python -m compileall -q src/cosmos_media
       - name: Run media edit contract tests
-        run: pytest -q tests/test_models.py tests/test_editing.py tests/test_edit_integrator.py
+        run: pytest -q tests/test_models.py tests/test_controller.py tests/test_editing.py tests/test_edit_integrator.py
       - name: Verify CLI edit surfaces
         run: |
           cosmos-media edit-image --help | grep -- '--mask'
