@@ -52,11 +52,21 @@ class Settings:
     seed_namespace: str = field(default_factory=lambda: os.getenv("COSMOS_SEED_NAMESPACE", "cosmos-media-v1"))
 
     # Editing/model configuration. COSMOS Main is a controller identity while
-    # edit_renderer names the implementation that actually changes pixels.
+    # renderers name the implementation that actually changes pixels.
     default_model: str = field(default_factory=lambda: os.getenv("COSMOS_DEFAULT_MODEL", "cosmos-main").strip().lower())
     edit_renderer: str = field(default_factory=lambda: os.getenv("COSMOS_EDIT_RENDERER", "native").strip().lower())
+    image_edit_renderer: str | None = field(default_factory=lambda: os.getenv("COSMOS_IMAGE_EDIT_RENDERER") or None)
+    video_edit_renderer: str | None = field(default_factory=lambda: os.getenv("COSMOS_VIDEO_EDIT_RENDERER") or None)
     edit_endpoint: str = field(default_factory=lambda: os.getenv("COSMOS_EDIT_ENDPOINT", "").rstrip("/"))
     max_upload_mb: int = field(default_factory=lambda: int(os.getenv("COSMOS_MAX_UPLOAD_MB", "256")))
+
+    # Optional local semantic renderer. The model is deliberately not bundled
+    # in desktop installers; it is loaded/downloaded only when explicitly used.
+    semantic_image_model: str = field(
+        default_factory=lambda: os.getenv("COSMOS_SEMANTIC_IMAGE_MODEL", "Qwen/Qwen-Image-Edit-2511").strip()
+    )
+    semantic_device: str = field(default_factory=lambda: os.getenv("COSMOS_SEMANTIC_DEVICE", "auto").strip().lower())
+    semantic_steps: int = field(default_factory=lambda: int(os.getenv("COSMOS_SEMANTIC_STEPS", "24")))
 
     def __post_init__(self) -> None:
         # A packaged desktop build includes imageio-ffmpeg. Resolve it during
@@ -65,8 +75,22 @@ class Settings:
         self.ffmpeg = self.resolved_ffmpeg()
         if self.max_upload_mb <= 0:
             raise ValueError("COSMOS_MAX_UPLOAD_MB must be positive")
-        if self.edit_renderer not in {"native", "http"}:
-            raise ValueError("COSMOS_EDIT_RENDERER must be 'native' or 'http'")
+        if self.semantic_steps <= 0 or self.semantic_steps > 100:
+            raise ValueError("COSMOS_SEMANTIC_STEPS must be between 1 and 100")
+        if self.semantic_device not in {"auto", "cpu", "cuda", "mps"}:
+            raise ValueError("COSMOS_SEMANTIC_DEVICE must be auto, cpu, cuda, or mps")
+
+        allowed = {"native", "http", "diffusers"}
+        self.edit_renderer = (self.edit_renderer or "native").strip().lower()
+        self.image_edit_renderer = (self.image_edit_renderer or self.edit_renderer).strip().lower()
+        self.video_edit_renderer = (self.video_edit_renderer or self.edit_renderer).strip().lower()
+        for name, value in (
+            ("COSMOS_EDIT_RENDERER", self.edit_renderer),
+            ("COSMOS_IMAGE_EDIT_RENDERER", self.image_edit_renderer),
+            ("COSMOS_VIDEO_EDIT_RENDERER", self.video_edit_renderer),
+        ):
+            if value not in allowed:
+                raise ValueError(f"{name} must be native, http, or diffusers")
 
     def ensure_dirs(self) -> None:
         for name in ("runs", "cache", "state", "receipts", "assets", "edit_jobs"):
@@ -109,6 +133,11 @@ class Settings:
             "seed_namespace": self.seed_namespace,
             "default_model": self.default_model,
             "edit_renderer": self.edit_renderer,
+            "image_edit_renderer": self.image_edit_renderer,
+            "video_edit_renderer": self.video_edit_renderer,
             "edit_endpoint_configured": bool(self.edit_endpoint),
             "max_upload_mb": self.max_upload_mb,
+            "semantic_image_model": self.semantic_image_model,
+            "semantic_device": self.semantic_device,
+            "semantic_steps": self.semantic_steps,
         }
