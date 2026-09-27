@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "COSMOS/CST stateful image, video, storybook and prompt-driven media editing engine"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Proprietary - see LICENSE and LICENSE_HISTORY.md"}
+license = "Apache-2.0"
 authors = [{name = "Cory Davis / NavisWORLD"}]
 dependencies = []
 classifiers = [
