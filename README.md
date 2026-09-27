@@ -6,7 +6,7 @@
 
 ## Current rights boundary
 
-Current and future Cory-owned original material expressly distributed under this repository's current `LICENSE` is **not offered for general commercial reuse, redistribution, modification, derivative-work creation, or incorporation into other products without separate written permission**. Historical copies previously distributed under Apache-2.0 retain the rights validly granted to those copies. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
+New revisions adopting the root Apache License 2.0 license original Cory-owned software and documentation under Apache-2.0, including commercial use and redistribution, unless a component has a distinct license. Older historical Apache and intervening rights-reserved copies retain their originally applicable rights. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
 
 Third-party libraries, SDKs, providers, models, datasets, weights, and tools retain their own licenses and terms.
 
@@ -288,7 +288,7 @@ This public build preserves the COSMOS / Cosmic Synapse Theory project lineage a
 
 ## License
 
-Current covered Cory-owned original material is distributed under the repository's restricted source rights notice. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
+For new revisions incorporating the root `LICENSE`, original Cory-owned copyrightable material is offered under Apache License 2.0, except component-specific terms. See `LICENSE`, `LICENSE_HISTORY.md`, and `COMMERCIAL_RIGHTS.md`.
 
 Historical copies or versions validly distributed under Apache License 2.0 retain the rights granted to those copies. The current rights notice does not revoke those historical grants.
 
