@@ -1,3 +1,5 @@
+> **2026-09-26 proposed transition:** New revisions with root Apache-2.0 LICENSE grant the licensed rights for covered Cory-owned original material. Permission-only provisions below refer to earlier source-available generations and cannot override the new grant.
+
 # Cory Davis / NavisWORLD — Intellectual Property and Access Notice
 
 **Effective date:** 2026-08-14
@@ -6,7 +8,7 @@ Copyright © 2026 Cory Davis / NavisWORLD. All rights reserved in original mater
 
 This notice applies only to original copyrightable material owned by Cory Davis / NavisWORLD that is not already subject to another license. It does not relicense third-party material or revoke rights validly granted under an earlier license for an earlier copy or version.
 
-Public availability permits inspection, evaluation, citation, and the limited uses GitHub's Terms of Service or applicable law necessarily permit. Except for those limited rights, no permission is granted to copy, modify, distribute, publish, sublicense, sell, commercialize, host as a service, incorporate into another product, create derivative works from, or otherwise exploit covered original material. No permission is granted for commercial AI/ML training, fine-tuning, retrieval, evaluation, distillation, synthetic-data, embedding, or model-development use except where applicable law independently permits it or a separate written agreement expressly authorizes it.
+Original Cory-owned material in new revisions adopting the Apache-2.0 root LICENSE may be reused, modified, redistributed and used commercially under that license, with no separate authorization required for those licensed uses. Third-party materials, model weights and sensitive data remain outside the grant.
 
 Any additional authorization must be in a separate written contract identifying the material and permitted scope and signed by Cory Davis and the counterparty. Email, DMs, issues, pull requests, stars, forks, downloads, verbal statements, or silence do not by themselves constitute additional permission. Cory Davis may require physical, in-person execution as a condition of granting permission.
 

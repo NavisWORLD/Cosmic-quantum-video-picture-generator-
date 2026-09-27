@@ -21,3 +21,7 @@ Dependencies, SDKs, libraries, models, datasets, provider services, documentatio
 ## Provenance
 
 Related COSMOS/CST research provenance: DOI `10.5281/zenodo.17574447`.
+
+## Prospective open-source restoration (2026-09-26)
+
+Upon adoption of the new Apache-2.0 root LICENSE, Cory-owned original source and documentation distributed in that generation are open-source under Apache-2.0 unless expressly noted otherwise. Earlier Apache releases and intervening rights-reserved copies remain governed by the terms originally granted for their copies. Third-party external models, weights, media, provider SDKs, datasets and private data are not automatically relicensed.
